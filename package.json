@@ -1,0 +1,16 @@
+{
+  "name": "vynl-prototype",
+  "version": "0.1.0",
+  "description": "Прототип музыкального приложения — учебный проект",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "better-sqlite3": "^11.3.0",
+    "multer": "^1.4.5-lts.1",
+    "bcryptjs": "^2.4.3",
+    "express-session": "^1.18.0"
+  }
+}

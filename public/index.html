@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vynl — твой музыкальный плеер</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #14121a;
+    --surface: #1e1b26;
+    --card: #262230;
+    --card-hover: #2e293a;
+    --text: #f2ede4;
+    --text-dim: #948f9e;
+    --accent: #e8a33d;
+    --accent-dim: #a9793a;
+    --teal: #4f7873;
+    --border: rgba(242,237,228,0.08);
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  h1,h2,h3, .display{ font-family: 'Fraunces', serif; }
+
+  .app{ display:flex; flex:1; min-height:0; }
+
+  /* SIDEBAR */
+  .sidebar{
+    width: 240px;
+    background: var(--surface);
+    padding: 28px 20px;
+    display:flex;
+    flex-direction:column;
+    gap: 32px;
+    border-right: 1px solid var(--border);
+  }
+  .brand{ display:flex; align-items:center; gap:10px; }
+  .brand-mark{
+    width: 30px; height:30px; border-radius:50%;
+    background: radial-gradient(circle at 35% 35%, #3a3548, #14121a 70%);
+    border: 2px solid var(--accent);
+    position:relative;
+  }
+  .brand-mark::after{
+    content:''; position:absolute; inset:0; margin:auto;
+    width:6px; height:6px; border-radius:50%; background: var(--accent);
+  }
+  .brand-name{ font-weight:700; font-size: 20px; letter-spacing: 0.5px;}
+
+  nav{ display:flex; flex-direction:column; gap:4px; }
+  .nav-item{
+    padding: 10px 12px; border-radius: 8px; color: var(--text-dim);
+    font-size: 14px; font-weight:500; cursor:pointer; transition: .15s;
+    display:flex; align-items:center; gap:10px;
+  }
+  .nav-item:hover{ background: var(--card); color: var(--text); }
+  .nav-item.active{ background: var(--card); color: var(--accent); }
+
+  .playlists{ display:flex; flex-direction:column; gap:2px; flex:1; overflow-y:auto; }
+  .playlists h3{ font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color: var(--text-dim); font-family:'Inter'; font-weight:600; margin-bottom:8px; }
+  .playlist-item{ padding: 7px 12px; border-radius:6px; font-size:13.5px; color:var(--text-dim); cursor:pointer; }
+  .playlist-item:hover{ background: var(--card); color: var(--text); }
+
+  .auth-area{ border-top: 1px solid var(--border); padding-top: 16px; }
+  .auth-user-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .auth-username{ font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .auth-logout-btn{ background:none; border:none; color: var(--text-dim); font-size:12px; cursor:pointer; text-decoration:underline; }
+  .auth-logout-btn:hover{ color: var(--text); }
+
+  /* MAIN */
+  main{ flex:1; overflow-y:auto; padding: 32px 40px 140px; }
+  .hero{
+    background: linear-gradient(135deg, #2e2438, #1a1720 70%);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 36px 40px;
+    margin-bottom: 36px;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero-eyebrow{ color: var(--accent); font-size:12px; letter-spacing:2px; text-transform:uppercase; font-weight:600; }
+  .hero h1{ font-size: 40px; margin: 10px 0 8px; font-weight:600; }
+  .hero p{ color: var(--text-dim); max-width: 480px; font-size:14.5px; line-height:1.5; }
+
+  .section-title{ font-size:19px; font-weight:600; margin: 32px 0 16px; }
+
+  .grid{
+    display:grid;
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: 20px;
+  }
+  .track-card{
+    background: var(--card);
+    border-radius: 12px;
+    padding: 14px;
+    cursor:pointer;
+    transition: .15s;
+    border: 1px solid transparent;
+  }
+  .track-card:hover{ background: var(--card-hover); border-color: var(--border); transform: translateY(-2px); }
+  .cover{
+    width:100%; aspect-ratio:1; border-radius:8px; margin-bottom:12px;
+    display:flex; align-items:center; justify-content:center;
+    font-family:'Fraunces'; font-size:15px; font-weight:600; color: rgba(20,18,26,0.75);
+    position:relative;
+  }
+  .track-title{ font-size:14px; font-weight:600; margin-bottom:3px; }
+  .track-artist{ font-size:12.5px; color: var(--text-dim); }
+  .track-card.playing .track-title{ color: var(--accent); }
+
+  /* PLAYER BAR */
+  .player-bar{
+    height: 96px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    display:flex;
+    align-items:center;
+    padding: 0 24px;
+    gap: 20px;
+  }
+  .now-playing{ display:flex; align-items:center; gap:14px; width: 280px; min-width:0; }
+
+  .vinyl{
+    width: 60px; height:60px; border-radius:50%;
+    background: repeating-radial-gradient(circle, #0d0c11 0px, #0d0c11 2px, #1a1720 3px, #1a1720 4px);
+    display:flex; align-items:center; justify-content:center;
+    flex-shrink:0;
+    animation: spin 3s linear infinite;
+    animation-play-state: paused;
+    border: 1px solid var(--border);
+  }
+  .vinyl.spinning{ animation-play-state: running; }
+  .vinyl-label{
+    width: 22px; height:22px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+  }
+  @keyframes spin{ from{transform:rotate(0)} to{transform:rotate(360deg)} }
+
+  .now-playing-info{ min-width:0; }
+  .now-playing-title{ font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .now-playing-artist{ font-size:12px; color: var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+  .controls{ flex:1; display:flex; flex-direction:column; align-items:center; gap:8px; max-width: 560px; margin: 0 auto; }
+  .control-buttons{ display:flex; align-items:center; gap:20px; }
+  .btn-icon{
+    background:none; border:none; color: var(--text); cursor:pointer;
+    opacity:0.8; transition:.15s; padding:4px;
+  }
+  .btn-icon:hover{ opacity:1; }
+  .play-btn{
+    width:36px; height:36px; border-radius:50%;
+    background: var(--text); color: var(--bg);
+    display:flex; align-items:center; justify-content:center;
+    opacity:1;
+  }
+  .play-btn:hover{ background: var(--accent); transform: scale(1.05); }
+
+  .progress-row{ display:flex; align-items:center; gap:10px; width:100%; }
+  .time{ font-family:'IBM Plex Mono'; font-size:11px; color: var(--text-dim); width:36px; }
+  .time.right{ text-align:right; }
+  .progress-track{
+    flex:1; height:4px; background: var(--card); border-radius:2px; position:relative; cursor:pointer;
+  }
+  .progress-fill{ position:absolute; left:0; top:0; height:100%; background: var(--accent); border-radius:2px; width:0%; }
+  .progress-track:hover .progress-fill{ background: #f2b45c; }
+
+  .volume-row{ width: 160px; display:flex; align-items:center; gap:8px; justify-content:flex-end; }
+  input[type=range]{
+    -webkit-appearance:none; width:90px; height:4px; background: var(--card); border-radius:2px; outline:none;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:11px; height:11px; border-radius:50%; background: var(--text); cursor:pointer;
+  }
+
+  ::-webkit-scrollbar{ width:8px; }
+  ::-webkit-scrollbar-thumb{ background: var(--card); border-radius:4px; }
+
+  /* UPLOAD BUTTON + MODAL */
+  .upload-btn{
+    background: var(--card); color: var(--text); border: 1px solid var(--border);
+    padding: 9px 16px; border-radius: 8px; font-size: 13.5px; font-weight:600;
+    cursor:pointer; font-family:'Inter'; transition:.15s;
+  }
+  .upload-btn:hover{ background: var(--card-hover); border-color: var(--accent); color: var(--accent); }
+
+  .modal-backdrop{
+    display:none; position:fixed; inset:0; background: rgba(10,9,13,0.7);
+    align-items:center; justify-content:center; z-index:50;
+  }
+  .modal-backdrop.open{ display:flex; }
+  .modal{
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 28px 28px 22px; width: 360px;
+  }
+  .form-label{ display:block; font-size:12.5px; color: var(--text-dim); margin: 14px 0 6px; font-weight:500; }
+  .form-label:first-of-type{ margin-top:0; }
+  .form-input{
+    width:100%; background: var(--card); border: 1px solid var(--border); color: var(--text);
+    padding: 9px 12px; border-radius: 8px; font-size: 14px; font-family:'Inter';
+  }
+  .form-input:focus{ outline:none; border-color: var(--accent); }
+  .modal-actions{ display:flex; justify-content:flex-end; gap:10px; margin-top:22px; }
+  .btn-secondary, .btn-primary{
+    padding: 9px 16px; border-radius: 8px; font-size: 13.5px; font-weight:600;
+    cursor:pointer; border:none; font-family:'Inter';
+  }
+  .btn-secondary{ background:none; color: var(--text-dim); }
+  .btn-secondary:hover{ color: var(--text); }
+  .btn-primary{ background: var(--accent); color: #1a1409; }
+  .btn-primary:hover{ background: #f2b45c; }
+  .btn-primary:disabled{ opacity:0.6; cursor:not-allowed; }
+  .upload-status{ font-size: 12.5px; margin-top:12px; color: var(--text-dim); min-height: 16px; }
+  .upload-status.error{ color: #d97757; }
+  .upload-status.success{ color: var(--accent); }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div class="brand-name">Vynl</div>
+    </div>
+    <nav>
+      <div class="nav-item active">Главная</div>
+      <div class="nav-item">Поиск</div>
+      <div class="nav-item">Библиотека</div>
+    </nav>
+    <div class="playlists">
+      <h3>Плейлисты</h3>
+      <div class="playlist-item">Вечерний фокус</div>
+      <div class="playlist-item">Дорожная смесь</div>
+      <div class="playlist-item">Инструментал</div>
+      <div class="playlist-item">Избранное</div>
+    </div>
+
+    <div class="auth-area" id="auth-area">
+      <button class="upload-btn" id="auth-open-btn" style="width:100%;">Войти</button>
+    </div>
+  </aside>
+
+  <main>
+    <div class="hero">
+      <div class="hero-eyebrow">Прототип · демо-треки</div>
+      <h1 class="display">Твой первый плеер</h1>
+      <p>Это рабочий каркас: плитки треков, плеер снизу, прогресс и громкость — всё кликабельно. Дальше будем подключать настоящий бэкенд, базу треков и учётные записи.</p>
+    </div>
+
+    <div class="section-title display" style="display:flex; align-items:center; justify-content:space-between;">
+      <span>Треки</span>
+      <button id="upload-open-btn" class="upload-btn">+ Добавить трек</button>
+    </div>
+    <div class="grid" id="track-grid"></div>
+  </main>
+</div>
+
+<!-- Модальное окно (всплывающая форма) для загрузки трека -->
+<div class="modal-backdrop" id="modal-backdrop">
+  <div class="modal">
+    <h3 class="display" style="margin-bottom:18px;">Добавить трек</h3>
+    <form id="upload-form">
+      <label class="form-label">Название трека</label>
+      <input type="text" id="input-title" class="form-input" required>
+
+      <label class="form-label">Исполнитель</label>
+      <input type="text" id="input-artist" class="form-input" required>
+
+      <label class="form-label">Аудиофайл (mp3)</label>
+      <input type="file" id="input-file" class="form-input" accept="audio/*" required>
+
+      <div class="modal-actions">
+        <button type="button" id="modal-cancel-btn" class="btn-secondary">Отмена</button>
+        <button type="submit" class="btn-primary">Загрузить</button>
+      </div>
+      <div id="upload-status" class="upload-status"></div>
+    </form>
+  </div>
+</div>
+
+<!-- Модальное окно входа / регистрации -->
+<div class="modal-backdrop" id="auth-modal-backdrop">
+  <div class="modal">
+    <h3 class="display" id="auth-modal-title" style="margin-bottom:18px;">Вход</h3>
+    <form id="auth-form">
+      <label class="form-label">Имя пользователя</label>
+      <input type="text" id="auth-username" class="form-input" required>
+
+      <label class="form-label">Пароль</label>
+      <input type="password" id="auth-password" class="form-input" required>
+
+      <div class="modal-actions" style="justify-content:space-between; align-items:center;">
+        <button type="button" id="auth-switch-mode-btn" class="btn-secondary" style="padding-left:0;">Нет аккаунта? Регистрация</button>
+        <button type="submit" class="btn-primary" id="auth-submit-btn">Войти</button>
+      </div>
+      <div id="auth-status" class="upload-status"></div>
+    </form>
+  </div>
+</div>
+
+<div class="player-bar">
+  <div class="now-playing">
+    <div class="vinyl" id="vinyl">
+      <div class="vinyl-label" id="vinyl-label"></div>
+    </div>
+    <div class="now-playing-info">
+      <div class="now-playing-title" id="np-title">Выбери трек</div>
+      <div class="now-playing-artist" id="np-artist">—</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="control-buttons">
+      <button class="btn-icon" id="prev-btn" title="Предыдущий">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+      </button>
+      <button class="play-btn" id="play-btn" title="Play/Pause">
+        <svg id="play-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+      </button>
+      <button class="btn-icon" id="next-btn" title="Следующий">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zm-9.5 6L15 18V6z"/></svg>
+      </button>
+    </div>
+    <div class="progress-row">
+      <span class="time" id="time-current">0:00</span>
+      <div class="progress-track" id="progress-track">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+      <span class="time right" id="time-total">0:00</span>
+    </div>
+  </div>
+
+  <div class="volume-row">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="color:var(--text-dim)"><path d="M3 9v6h4l5 5V4L7 9H3z"/></svg>
+    <input type="range" id="volume" min="0" max="100" value="70">
+  </div>
+</div>
+
+<audio id="audio"></audio>
+
+<script>
+  // Раньше список треков был прямо здесь, в коде.
+  // Теперь мы его СПРАШИВАЕМ у сервера — это и называется "запрос к API".
+  let tracks = [];
+
+  async function loadTracksFromServer(){
+    const response = await fetch('/api/tracks'); // делаем запрос на наш сервер
+    tracks = await response.json();              // превращаем ответ в обычный JS-массив
+    renderTrackCards();                           // теперь, когда данные пришли, рисуем карточки
+  }
+
+  const grid = document.getElementById('track-grid');
+  const audio = document.getElementById('audio');
+  const playBtn = document.getElementById('play-btn');
+  const playIcon = document.getElementById('play-icon');
+  const vinyl = document.getElementById('vinyl');
+  const vinylLabel = document.getElementById('vinyl-label');
+  const npTitle = document.getElementById('np-title');
+  const npArtist = document.getElementById('np-artist');
+  const progressFill = document.getElementById('progress-fill');
+  const progressTrack = document.getElementById('progress-track');
+  const timeCurrent = document.getElementById('time-current');
+  const timeTotal = document.getElementById('time-total');
+  const volume = document.getElementById('volume');
+
+  let currentIndex = -1;
+  let isPlaying = false;
+
+  function initials(title){ return title.trim().slice(0,2).toUpperCase(); }
+
+  function renderTrackCards(){
+    grid.innerHTML = ''; // на случай повторного вызова — чистим сетку перед отрисовкой
+    tracks.forEach((t, i) => {
+      const card = document.createElement('div');
+      card.className = 'track-card';
+      card.id = 'card-' + i;
+      card.innerHTML = `
+        <div class="cover" style="background:${t.color}">${initials(t.title)}</div>
+        <div class="track-title">${t.title}</div>
+        <div class="track-artist">${t.artist}</div>
+      `;
+      card.addEventListener('click', () => loadTrack(i, true));
+      grid.appendChild(card);
+    });
+  }
+
+  loadTracksFromServer(); // запускаем загрузку треков сразу при открытии страницы
+
+  // --- Загрузка своего трека ---
+  const modalBackdrop = document.getElementById('modal-backdrop');
+  const uploadForm = document.getElementById('upload-form');
+  const uploadStatus = document.getElementById('upload-status');
+
+  document.getElementById('upload-open-btn').addEventListener('click', () => {
+    modalBackdrop.classList.add('open');
+  });
+  document.getElementById('modal-cancel-btn').addEventListener('click', () => {
+    modalBackdrop.classList.remove('open');
+  });
+
+  uploadForm.addEventListener('submit', async (e) => {
+    e.preventDefault(); // не даём странице перезагрузиться, как это делает обычная форма
+
+    const title = document.getElementById('input-title').value;
+    const artist = document.getElementById('input-artist').value;
+    const file = document.getElementById('input-file').files[0];
+
+    // FormData — специальный объект для отправки файлов (обычный JSON для этого не подходит).
+    const formData = new FormData();
+    formData.append('title', title);
+    formData.append('artist', artist);
+    formData.append('audioFile', file);
+
+    uploadStatus.textContent = 'Загружаем...';
+    uploadStatus.className = 'upload-status';
+
+    try {
+      const response = await fetch('/api/tracks', {
+        method: 'POST',        // POST значит "отправляю новые данные", а не просто "дай мне данные"
+        body: formData         // тело запроса — сам файл и текстовые поля
+      });
+
+      if (!response.ok) throw new Error('Сервер отклонил запрос');
+
+      uploadStatus.textContent = 'Готово!';
+      uploadStatus.className = 'upload-status success';
+
+      await loadTracksFromServer(); // подтягиваем обновлённый список треков с сервера
+      uploadForm.reset();
+      setTimeout(() => {
+        modalBackdrop.classList.remove('open');
+        uploadStatus.textContent = '';
+      }, 700);
+
+    } catch (err) {
+      uploadStatus.textContent = 'Ошибка загрузки. Попробуй ещё раз.';
+      uploadStatus.className = 'upload-status error';
+    }
+  });
+
+  // --- Регистрация / вход ---
+  const authArea = document.getElementById('auth-area');
+  const authModalBackdrop = document.getElementById('auth-modal-backdrop');
+  const authForm = document.getElementById('auth-form');
+  const authStatus = document.getElementById('auth-status');
+  const authModalTitle = document.getElementById('auth-modal-title');
+  const authSwitchBtn = document.getElementById('auth-switch-mode-btn');
+  const authSubmitBtn = document.getElementById('auth-submit-btn');
+
+  let authMode = 'login'; // или 'register'
+
+  function renderAuthArea(user){
+    if (user){
+      authArea.innerHTML = `
+        <div class="auth-user-row">
+          <span class="auth-username">${user.username}</span>
+          <button class="auth-logout-btn" id="logout-btn">Выйти</button>
+        </div>
+      `;
+      document.getElementById('logout-btn').addEventListener('click', async () => {
+        await fetch('/api/logout', { method: 'POST' });
+        renderAuthArea(null);
+      });
+    } else {
+      authArea.innerHTML = `<button class="upload-btn" id="auth-open-btn" style="width:100%;">Войти</button>`;
+      document.getElementById('auth-open-btn').addEventListener('click', openAuthModal);
+    }
+  }
+
+  function openAuthModal(){
+    authModalBackdrop.classList.add('open');
+  }
+
+  function setAuthMode(mode){
+    authMode = mode;
+    if (mode === 'login'){
+      authModalTitle.textContent = 'Вход';
+      authSubmitBtn.textContent = 'Войти';
+      authSwitchBtn.textContent = 'Нет аккаунта? Регистрация';
+    } else {
+      authModalTitle.textContent = 'Регистрация';
+      authSubmitBtn.textContent = 'Создать аккаунт';
+      authSwitchBtn.textContent = 'Уже есть аккаунт? Войти';
+    }
+    authStatus.textContent = '';
+  }
+
+  authSwitchBtn.addEventListener('click', () => {
+    setAuthMode(authMode === 'login' ? 'register' : 'login');
+  });
+
+  authForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const username = document.getElementById('auth-username').value;
+    const password = document.getElementById('auth-password').value;
+    const url = authMode === 'login' ? '/api/login' : '/api/register';
+
+    authStatus.textContent = 'Подождите...';
+    authStatus.className = 'upload-status';
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }, // говорим серверу, что тело — JSON
+        body: JSON.stringify({ username, password })
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        authStatus.textContent = data.error || 'Что-то пошло не так.';
+        authStatus.className = 'upload-status error';
+        return;
+      }
+
+      renderAuthArea(data);
+      authForm.reset();
+      authModalBackdrop.classList.remove('open');
+      authStatus.textContent = '';
+
+    } catch (err) {
+      authStatus.textContent = 'Ошибка соединения с сервером.';
+      authStatus.className = 'upload-status error';
+    }
+  });
+
+  // При открытии страницы спрашиваем сервер: "а я уже вошёл?"
+  // (сервер поймёт это по cookie, которую сам же выдал при предыдущем входе)
+  async function checkCurrentUser(){
+    const response = await fetch('/api/me');
+    const data = await response.json();
+    renderAuthArea(data.user);
+  }
+  checkCurrentUser();
+
+  // Клик по тёмному фону (не по самому окну) закрывает модалку — так удобнее.
+  [modalBackdrop, authModalBackdrop].forEach(backdrop => {
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) backdrop.classList.remove('open');
+    });
+  });
+
+  function fmt(sec){
+    if (!isFinite(sec)) return '0:00';
+    const m = Math.floor(sec/60), s = Math.floor(sec%60);
+    return m + ':' + String(s).padStart(2,'0');
+  }
+
+  function loadTrack(i, autoplay){
+    document.querySelectorAll('.track-card').forEach(c => c.classList.remove('playing'));
+    currentIndex = i;
+    const t = tracks[i];
+    audio.src = t.src;
+    npTitle.textContent = t.title;
+    npArtist.textContent = t.artist;
+    vinylLabel.style.background = t.color;
+    document.getElementById('card-' + i).classList.add('playing');
+    if (autoplay){
+      audio.play();
+    }
+  }
+
+  function setPlayingState(playing){
+    isPlaying = playing;
+    vinyl.classList.toggle('spinning', playing);
+    playIcon.innerHTML = playing
+      ? '<path d="M6 5h4v14H6zm8 0h4v14h-4z"/>'
+      : '<path d="M8 5v14l11-7z"/>';
+  }
+
+  playBtn.addEventListener('click', () => {
+    if (currentIndex === -1){ loadTrack(0, true); return; }
+    if (audio.paused){ audio.play(); } else { audio.pause(); }
+  });
+
+  document.getElementById('next-btn').addEventListener('click', () => {
+    const next = currentIndex === -1 ? 0 : (currentIndex + 1) % tracks.length;
+    loadTrack(next, true);
+  });
+
+  document.getElementById('prev-btn').addEventListener('click', () => {
+    const prev = currentIndex <= 0 ? tracks.length - 1 : currentIndex - 1;
+    loadTrack(prev, true);
+  });
+
+  audio.addEventListener('play', () => setPlayingState(true));
+  audio.addEventListener('pause', () => setPlayingState(false));
+  audio.addEventListener('ended', () => {
+    const next = (currentIndex + 1) % tracks.length;
+    loadTrack(next, true);
+  });
+
+  audio.addEventListener('timeupdate', () => {
+    if (!audio.duration) return;
+    const pct = (audio.currentTime / audio.duration) * 100;
+    progressFill.style.width = pct + '%';
+    timeCurrent.textContent = fmt(audio.currentTime);
+  });
+
+  audio.addEventListener('loadedmetadata', () => {
+    timeTotal.textContent = fmt(audio.duration);
+  });
+
+  progressTrack.addEventListener('click', (e) => {
+    if (!audio.duration) return;
+    const rect = progressTrack.getBoundingClientRect();
+    const pct = (e.clientX - rect.left) / rect.width;
+    audio.currentTime = pct * audio.duration;
+  });
+
+  volume.addEventListener('input', () => {
+    audio.volume = volume.value / 100;
+  });
+  audio.volume = 0.7;
+</script>
+
+</body>
+</html>
