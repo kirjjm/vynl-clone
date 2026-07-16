@@ -16,11 +16,52 @@ const PORT = process.env.PORT || 3000;
 
 // Открываем файл базы данных. Если его ещё нет — сначала запусти:
 //   node setup-db.js
-const db = new Database('vynl.db');
+// DATA_DIR — путь к постоянному хранилищу на хостинге (Railway Volume).
+// Локально на твоём компьютере такой переменной нет, поэтому используется папка проекта.
+const dataDir = process.env.DATA_DIR || __dirname;
+const db = new Database(path.join(dataDir, 'vynl.db'));
+
+// Создаём таблицы, если их ещё нет (важно при первом запуске на хостинге —
+// там некому вручную выполнить setup-db.js, поэтому сервер делает это сам).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS tracks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    artist TEXT NOT NULL,
+    color TEXT NOT NULL,
+    src TEXT NOT NULL
+  )
+`);
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL
+  )
+`);
+
+// При самом первом запуске (пустая таблица) — наполняем демо-треками,
+// точно так же, как это делал отдельный файл setup-db.js.
+const trackCount = db.prepare('SELECT COUNT(*) AS count FROM tracks').get();
+if (trackCount.count === 0) {
+  const insertInitial = db.prepare(
+    'INSERT INTO tracks (title, artist, color, src) VALUES (?, ?, ?, ?)'
+  );
+  const initialTracks = [
+    ["Ночной эфир",     "Studio Loop",  "#e8a33d", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"],
+    ["Пустая комната",  "Aria North",   "#4f7873", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3"],
+    ["Сигнал",          "Vector Field", "#8a6fd6", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3"],
+    ["Медленный город", "Studio Loop",  "#c76b6b", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3"],
+    ["Стекло",          "Nine Rivers",  "#5c9ad6", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3"],
+    ["Между строк",     "Aria North",   "#e0b84f", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3"],
+  ];
+  for (const t of initialTracks) insertInitial.run(...t);
+  console.log(`Добавлено ${initialTracks.length} демо-треков при первом запуске.`);
+}
 
 // Папка, куда будут физически сохраняться загруженные mp3-файлы.
-// Создаём её, если она ещё не существует.
-const uploadsDir = path.join(__dirname, 'public', 'uploads');
+// Тоже кладём внутрь dataDir, чтобы они сохранялись на постоянном диске.
+const uploadsDir = path.join(dataDir, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
@@ -45,6 +86,9 @@ const coverColors = ["#e8a33d", "#4f7873", "#8a6fd6", "#c76b6b", "#5c9ad6", "#e0
 // Middleware: раздаём всё содержимое папки /public как обычные файлы
 // (это касается и папки /public/uploads — значит загруженные mp3 тоже станут доступны по ссылке).
 app.use(express.static(path.join(__dirname, 'public')));
+// Отдельно раздаём загруженные mp3-файлы — они теперь лежат в dataDir/uploads,
+// а не внутри /public, потому что этой папке нужно постоянное хранилище.
+app.use('/uploads', express.static(uploadsDir));
 
 // Express сам не умеет читать данные из форм (кроме файлов) — эта строка это включает.
 app.use(express.urlencoded({ extended: true }));
