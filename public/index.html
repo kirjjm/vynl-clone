@@ -27,6 +27,7 @@
     --shadow:0 22px 54px rgba(60,70,130,.20);
     --danger:#d6455f;
     --ok:#1f9d78;
+    --modal-bg:rgba(248,249,253,.97);
   }
   @media (prefers-color-scheme: dark){
     :root{
@@ -34,7 +35,7 @@
       --glass:rgba(255,255,255,.06); --glass-strong:rgba(255,255,255,.09);
       --glass-line:rgba(255,255,255,.12); --card:rgba(255,255,255,.05); --card-hover:rgba(255,255,255,.1);
       --gA:rgba(80,130,255,.24); --gB:rgba(150,90,240,.20); --gC:rgba(60,200,180,.16);
-      --shadow:0 22px 54px rgba(0,0,0,.55); --danger:#ff7089; --ok:#4fd6a8;
+      --shadow:0 22px 54px rgba(0,0,0,.55); --danger:#ff7089; --ok:#4fd6a8; --modal-bg:rgba(18,20,32,.97);
     }
   }
   :root[data-theme="dark"]{
@@ -42,14 +43,14 @@
     --glass:rgba(255,255,255,.06); --glass-strong:rgba(255,255,255,.09);
     --glass-line:rgba(255,255,255,.12); --card:rgba(255,255,255,.05); --card-hover:rgba(255,255,255,.1);
     --gA:rgba(80,130,255,.24); --gB:rgba(150,90,240,.20); --gC:rgba(60,200,180,.16);
-    --shadow:0 22px 54px rgba(0,0,0,.55); --danger:#ff7089; --ok:#4fd6a8;
+    --shadow:0 22px 54px rgba(0,0,0,.55); --danger:#ff7089; --ok:#4fd6a8; --modal-bg:rgba(18,20,32,.97);
   }
   :root[data-theme="light"]{
     --bg:#e7eaf4; --text:#12141d; --dim:#5f6579; --accent:#6a5cff; --accent-2:#48cebe;
     --glass:rgba(255,255,255,.6); --glass-strong:rgba(255,255,255,.72);
     --glass-line:rgba(255,255,255,.85); --card:rgba(255,255,255,.5); --card-hover:rgba(255,255,255,.72);
     --gA:rgba(96,150,255,.30); --gB:rgba(150,110,240,.24); --gC:rgba(72,206,190,.20);
-    --shadow:0 22px 54px rgba(60,70,130,.20); --danger:#d6455f; --ok:#1f9d78;
+    --shadow:0 22px 54px rgba(60,70,130,.20); --danger:#d6455f; --ok:#1f9d78; --modal-bg:rgba(248,249,253,.97);
   }
 
   *{box-sizing:border-box; margin:0; padding:0;}
@@ -94,13 +95,15 @@
     display:flex; flex-direction:column; gap:26px;
     box-shadow:var(--shadow);
   }
-  .brand{ display:flex; align-items:center; gap:11px; }
+  .brand{ display:flex; align-items:center; justify-content:center; gap:11px; cursor:pointer; padding:2px; border-radius:12px; }
+  .brand:focus-visible{ outline:2px solid var(--accent); outline-offset:3px; }
   .brand-mark{
-    width:26px; height:26px; border-radius:8px;
+    width:36px; height:36px; border-radius:11px;
     background:conic-gradient(from 45deg, #6096ff, #9670f0, #48cebe, #6096ff);
     box-shadow:0 4px 14px rgba(106,92,255,.4);
+    transition:transform .15s ease;
   }
-  .brand-name{ font-weight:700; font-size:20px; letter-spacing:.01em; }
+  .brand:hover .brand-mark{ transform:scale(1.08); }
 
   nav{ display:flex; flex-direction:column; gap:3px; }
   .nav-item{
@@ -123,7 +126,7 @@
   .playlist-item{ padding:7px 12px; margin:0 -8px; border-radius:10px; font-size:13.5px; color:var(--dim); cursor:pointer; }
   .playlist-item:hover{ background:var(--card); color:var(--text); }
 
-  .auth-area{ border-top:1px solid var(--glass-line); padding-top:16px; }
+  .auth-area{ padding-top:4px; }
   .auth-user-row{ display:flex; align-items:center; gap:10px; }
   .auth-ava{
     width:30px; height:30px; border-radius:50%; flex-shrink:0;
@@ -180,6 +183,14 @@
   .section-title{ font-size:19px; font-weight:700; display:flex; align-items:center; gap:12px; }
   .back-link{ font-size:13px; font-weight:500; color:var(--dim); cursor:pointer; }
   .back-link:hover{ color:var(--accent); }
+  .section-actions{ display:flex; align-items:center; gap:10px; }
+  .search-input{
+    background:var(--card); border:1px solid var(--glass-line); color:var(--text);
+    padding:9px 14px; border-radius:12px; font-size:14px; font-family:inherit; width:230px;
+    backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+  }
+  .search-input:focus{ outline:none; border-color:var(--accent); }
+  .search-input::placeholder{ color:var(--dim); }
 
   .grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(168px,1fr)); gap:18px; }
   .track-card{
@@ -209,7 +220,7 @@
 
   .add-to-playlist-popover{
     display:none; position:fixed; z-index:60;
-    background:var(--glass-strong); border:1px solid var(--glass-line); border-radius:14px; padding:6px; min-width:190px;
+    background:var(--modal-bg); border:1px solid var(--glass-line); border-radius:14px; padding:6px; min-width:190px;
     backdrop-filter:blur(22px); -webkit-backdrop-filter:blur(22px); box-shadow:var(--shadow);
   }
   .add-to-playlist-popover.open{ display:block; }
@@ -277,7 +288,7 @@
   }
   .modal-backdrop.open{ display:flex; }
   .modal{
-    background:var(--glass-strong); border:1px solid var(--glass-line); border-radius:20px;
+    background:var(--modal-bg); border:1px solid var(--glass-line); border-radius:20px;
     backdrop-filter:blur(30px); -webkit-backdrop-filter:blur(30px); box-shadow:var(--shadow);
     padding:28px 28px 22px; width:370px;
   }
@@ -313,20 +324,19 @@
 
 <div class="app">
   <aside class="sidebar">
-    <div class="brand">
+    <div class="brand" id="logo-home" title="На главную" role="button" tabindex="0">
       <div class="brand-mark"></div>
-      <div class="brand-name">Vynl</div>
     </div>
     <nav>
-      <div class="nav-item active">
+      <div class="nav-item active" id="nav-home">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
         Главная
       </div>
-      <div class="nav-item">
+      <div class="nav-item" id="nav-search">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
         Поиск
       </div>
-      <div class="nav-item">
+      <div class="nav-item" id="nav-library">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M4 10h12M4 15h8"/><circle cx="18" cy="16" r="3"/><path d="M21 16V7"/></svg>
         Библиотека
       </div>
@@ -366,10 +376,13 @@
 
     <div class="section-head">
       <div class="section-title">
-        <span id="section-title-text">Библиотека</span>
+        <span id="section-title-text">Главная</span>
         <span id="back-to-library-link" class="back-link" style="display:none;">← Ко всем трекам</span>
       </div>
-      <button id="upload-open-btn" class="btn-glass">+ Добавить трек</button>
+      <div class="section-actions">
+        <input type="text" id="search-input" class="search-input" placeholder="Поиск по трекам…" style="display:none;">
+        <button id="upload-open-btn" class="btn-glass">+ Добавить трек</button>
+      </div>
     </div>
     <div class="grid" id="track-grid"></div>
   </main>
@@ -455,7 +468,7 @@
         <svg id="play-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
       </button>
       <button class="btn-icon" id="next-btn" title="Следующий">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zm-9.5 6L15 18V6z"/></svg>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zm-10 0l9 6-9 6z"/></svg>
       </button>
     </div>
     <div class="progress-row">
@@ -504,10 +517,12 @@
 
   // ---------- Данные треков берём с сервера ----------
   let tracks = [];
+  let libraryTracks = [];   // полный список библиотеки — нужен для поиска и возврата на главную
 
   async function loadTracksFromServer(){
     const response = await fetch('/api/tracks');
     tracks = await response.json();
+    libraryTracks = tracks.slice();
     renderTrackCards();
   }
 
@@ -904,6 +919,63 @@
 
   volume.addEventListener('input', () => { audio.volume = volume.value / 100; });
   audio.volume = 0.7;
+
+  // ---------- Навигация: Главная / Поиск / Библиотека ----------
+  const navItemsAll = document.querySelectorAll('.nav-item');
+  const navHome = document.getElementById('nav-home');
+  const navSearch = document.getElementById('nav-search');
+  const navLibrary = document.getElementById('nav-library');
+  const heroEl = document.querySelector('.hero');
+  const searchInput = document.getElementById('search-input');
+
+  function setActiveNav(el){
+    navItemsAll.forEach(n => n.classList.remove('active'));
+    if (el) el.classList.add('active');
+  }
+
+  // Показать полную библиотеку (используется и «Главной», и «Библиотекой»).
+  function showLibraryView(title, activeEl){
+    setActiveNav(activeEl);
+    sectionTitleText.textContent = title;
+    backToLibraryLink.style.display = 'none';
+    heroEl.style.display = '';
+    searchInput.style.display = 'none';
+    searchInput.value = '';
+    tracks = libraryTracks;
+    renderTrackCards();
+  }
+
+  function goHome(){ showLibraryView('Главная', navHome); }
+  function goLibrary(){ showLibraryView('Библиотека', navLibrary); }
+
+  function goSearch(){
+    setActiveNav(navSearch);
+    sectionTitleText.textContent = 'Поиск';
+    backToLibraryLink.style.display = 'none';
+    heroEl.style.display = 'none';           // в поиске герой прячем, чтобы не мешал
+    searchInput.style.display = '';
+    searchInput.focus();
+    applySearch();
+  }
+
+  // Живая фильтрация по названию и исполнителю.
+  function applySearch(){
+    const q = searchInput.value.trim().toLowerCase();
+    tracks = q
+      ? libraryTracks.filter(t => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q))
+      : libraryTracks.slice();
+    renderTrackCards();
+  }
+
+  navHome.addEventListener('click', goHome);
+  navLibrary.addEventListener('click', goLibrary);
+  navSearch.addEventListener('click', goSearch);
+  searchInput.addEventListener('input', applySearch);
+
+  // Клик (и Enter) по логотипу — возврат на главную.
+  const logoHome = document.getElementById('logo-home');
+  logoHome.addEventListener('click', goHome);
+  logoHome.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goHome(); } });
 </script>
 
 </body>
