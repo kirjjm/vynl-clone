@@ -40,6 +40,29 @@ db.exec(`
   )
 `);
 
+// Сам плейлист — просто название и чей он (user_id).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS playlists (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  )
+`);
+
+// Таблица-связка: какой трек лежит в каком плейлисте.
+// Один трек может быть сразу в нескольких разных плейлистах — поэтому
+// это отдельная таблица, а не просто список id внутри playlists.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS playlist_tracks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    playlist_id INTEGER NOT NULL,
+    track_id INTEGER NOT NULL,
+    FOREIGN KEY (playlist_id) REFERENCES playlists(id),
+    FOREIGN KEY (track_id) REFERENCES tracks(id)
+  )
+`);
+
 // При самом первом запуске (пустая таблица) — наполняем демо-треками,
 // точно так же, как это делал отдельный файл setup-db.js.
 const trackCount = db.prepare('SELECT COUNT(*) AS count FROM tracks').get();
@@ -199,6 +222,61 @@ app.get('/api/me', (req, res) => {
   }
   const user = db.prepare('SELECT id, username FROM users WHERE id = ?').get(req.session.userId);
   res.json({ user: user || null });
+});
+
+// --- Middleware: "охранник" для маршрутов, которые доступны только вошедшим ---
+// Ставится ПЕРЕД обработчиком маршрута. Если пользователь не вошёл — сразу
+// отвечает ошибкой и не пускает код дальше. Если вошёл — пропускает (next()).
+function requireLogin(req, res, next) {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: 'Нужно войти в аккаунт.' });
+  }
+  next();
+}
+
+// --- Список плейлистов текущего пользователя ---
+app.get('/api/playlists', requireLogin, (req, res) => {
+  const playlists = db.prepare('SELECT * FROM playlists WHERE user_id = ?').all(req.session.userId);
+  res.json(playlists);
+});
+
+// --- Создать новый плейлист ---
+app.post('/api/playlists', requireLogin, (req, res) => {
+  const { name } = req.body;
+  if (!name) return res.status(400).json({ error: 'Укажи название плейлиста.' });
+
+  const insert = db.prepare('INSERT INTO playlists (user_id, name) VALUES (?, ?)');
+  const result = insert.run(req.session.userId, name);
+  res.json({ id: result.lastInsertRowid, user_id: req.session.userId, name });
+});
+
+// --- Получить один плейлист вместе со всеми его треками ---
+app.get('/api/playlists/:id', requireLogin, (req, res) => {
+  const playlist = db.prepare('SELECT * FROM playlists WHERE id = ? AND user_id = ?')
+    .get(req.params.id, req.session.userId);
+  if (!playlist) return res.status(404).json({ error: 'Плейлист не найден.' });
+
+  // JOIN — объединяем две таблицы: playlist_tracks (кто в каком плейлисте)
+  // и tracks (сама информация о треке), чтобы получить полные данные треков.
+  const tracks = db.prepare(`
+    SELECT tracks.* FROM playlist_tracks
+    JOIN tracks ON tracks.id = playlist_tracks.track_id
+    WHERE playlist_tracks.playlist_id = ?
+  `).all(req.params.id);
+
+  res.json({ ...playlist, tracks });
+});
+
+// --- Добавить трек в плейлист ---
+app.post('/api/playlists/:id/tracks', requireLogin, (req, res) => {
+  const { trackId } = req.body;
+  const playlist = db.prepare('SELECT * FROM playlists WHERE id = ? AND user_id = ?')
+    .get(req.params.id, req.session.userId);
+  if (!playlist) return res.status(404).json({ error: 'Плейлист не найден.' });
+
+  db.prepare('INSERT INTO playlist_tracks (playlist_id, track_id) VALUES (?, ?)')
+    .run(req.params.id, trackId);
+  res.json({ ok: true });
 });
 
 // Запускаем сервер — он начинает "слушать" запросы на порту 3000.

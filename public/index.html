@@ -117,6 +117,24 @@
   .track-artist{ font-size:12.5px; color: var(--text-dim); }
   .track-card.playing .track-title{ color: var(--accent); }
 
+  .add-to-playlist-btn{
+    position:absolute; top:6px; right:6px; width:22px; height:22px; border-radius:50%;
+    background: rgba(20,18,26,0.55); border:none; color:#fff; font-size:15px; line-height:1;
+    cursor:pointer; opacity:0; transition:.15s;
+  }
+  .track-card:hover .add-to-playlist-btn{ opacity:1; }
+  .add-to-playlist-btn:hover{ background: var(--accent); }
+
+  .add-to-playlist-popover{
+    display:none; position:fixed; z-index:60; background: var(--surface);
+    border:1px solid var(--border); border-radius: 10px; padding:6px; min-width:180px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+  .add-to-playlist-popover.open{ display:block; }
+  .popover-item{ padding:7px 10px; border-radius:6px; font-size:13px; cursor:pointer; color: var(--text); }
+  .popover-item:hover{ background: var(--card); }
+  .popover-empty{ padding:7px 10px; font-size:12.5px; color: var(--text-dim); }
+
   /* PLAYER BAR */
   .player-bar{
     height: 96px;
@@ -237,11 +255,13 @@
       <div class="nav-item">Библиотека</div>
     </nav>
     <div class="playlists">
-      <h3>Плейлисты</h3>
-      <div class="playlist-item">Вечерний фокус</div>
-      <div class="playlist-item">Дорожная смесь</div>
-      <div class="playlist-item">Инструментал</div>
-      <div class="playlist-item">Избранное</div>
+      <h3 style="display:flex; align-items:center; justify-content:space-between;">
+        <span>Плейлисты</span>
+        <button id="new-playlist-btn" title="Новый плейлист" style="background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:15px; line-height:1;">+</button>
+      </h3>
+      <div id="playlist-list">
+        <div class="playlist-item" style="color:var(--text-dim); cursor:default;">Войди, чтобы создавать плейлисты</div>
+      </div>
     </div>
 
     <div class="auth-area" id="auth-area">
@@ -257,7 +277,10 @@
     </div>
 
     <div class="section-title display" style="display:flex; align-items:center; justify-content:space-between;">
-      <span>Треки</span>
+      <span>
+        <span id="section-title-text">Треки</span>
+        <a href="#" id="back-to-library-link" style="display:none; font-size:13px; font-family:'Inter'; font-weight:500; color:var(--text-dim); margin-left:12px; text-decoration:underline;">← Ко всем трекам</a>
+      </span>
       <button id="upload-open-btn" class="upload-btn">+ Добавить трек</button>
     </div>
     <div class="grid" id="track-grid"></div>
@@ -306,6 +329,25 @@
     </form>
   </div>
 </div>
+
+<!-- Модальное окно создания нового плейлиста -->
+<div class="modal-backdrop" id="playlist-modal-backdrop">
+  <div class="modal">
+    <h3 class="display" style="margin-bottom:18px;">Новый плейлист</h3>
+    <form id="playlist-form">
+      <label class="form-label">Название</label>
+      <input type="text" id="playlist-name-input" class="form-input" required>
+      <div class="modal-actions">
+        <button type="button" id="playlist-cancel-btn" class="btn-secondary">Отмена</button>
+        <button type="submit" class="btn-primary">Создать</button>
+      </div>
+      <div id="playlist-status" class="upload-status"></div>
+    </form>
+  </div>
+</div>
+
+<!-- Маленькое всплывающее меню "добавить трек в плейлист" -->
+<div class="add-to-playlist-popover" id="add-to-playlist-popover"></div>
 
 <div class="player-bar">
   <div class="now-playing">
@@ -384,11 +426,18 @@
       card.className = 'track-card';
       card.id = 'card-' + i;
       card.innerHTML = `
-        <div class="cover" style="background:${t.color}">${initials(t.title)}</div>
+        <div class="cover" style="background:${t.color}">
+          ${initials(t.title)}
+          <button class="add-to-playlist-btn" data-track-id="${t.id}" title="Добавить в плейлист">+</button>
+        </div>
         <div class="track-title">${t.title}</div>
         <div class="track-artist">${t.artist}</div>
       `;
       card.addEventListener('click', () => loadTrack(i, true));
+      card.querySelector('.add-to-playlist-btn').addEventListener('click', (e) => {
+        e.stopPropagation(); // чтобы клик по "+" не запускал воспроизведение трека
+        openAddToPlaylistPopover(e.currentTarget, t.id);
+      });
       grid.appendChild(card);
     });
   }
@@ -470,9 +519,11 @@
         await fetch('/api/logout', { method: 'POST' });
         renderAuthArea(null);
       });
+      loadPlaylists(); // теперь, когда мы знаем, что пользователь вошёл — подгружаем его плейлисты
     } else {
       authArea.innerHTML = `<button class="upload-btn" id="auth-open-btn" style="width:100%;">Войти</button>`;
       document.getElementById('auth-open-btn').addEventListener('click', openAuthModal);
+      renderPlaylistList([]); // выходим — очищаем список плейлистов в сайдбаре
     }
   }
 
@@ -541,8 +592,125 @@
   }
   checkCurrentUser();
 
+  // --- Плейлисты ---
+  const playlistListEl = document.getElementById('playlist-list');
+  const playlistModalBackdrop = document.getElementById('playlist-modal-backdrop');
+  const playlistForm = document.getElementById('playlist-form');
+  const playlistStatus = document.getElementById('playlist-status');
+  const popover = document.getElementById('add-to-playlist-popover');
+
+  let myPlaylists = []; // список плейлистов текущего пользователя, храним в памяти
+
+  async function loadPlaylists(){
+    const response = await fetch('/api/playlists');
+    if (!response.ok) return; // не вошли — просто ничего не показываем
+    myPlaylists = await response.json();
+    renderPlaylistList(myPlaylists);
+  }
+
+  function renderPlaylistList(playlists){
+    if (playlists.length === 0){
+      playlistListEl.innerHTML = `<div class="playlist-item" style="color:var(--text-dim); cursor:default;">Пока нет плейлистов</div>`;
+      return;
+    }
+    playlistListEl.innerHTML = playlists.map(p =>
+      `<div class="playlist-item" data-playlist-id="${p.id}">${p.name}</div>`
+    ).join('');
+
+    // Клик по плейлисту — показываем только его треки в основной сетке.
+    playlistListEl.querySelectorAll('.playlist-item[data-playlist-id]').forEach(el => {
+      el.addEventListener('click', () => openPlaylistView(el.dataset.playlistId, el.textContent));
+    });
+  }
+
+  const sectionTitleText = document.getElementById('section-title-text');
+  const backToLibraryLink = document.getElementById('back-to-library-link');
+
+  async function openPlaylistView(playlistId, name){
+    const response = await fetch(`/api/playlists/${playlistId}`);
+    if (!response.ok) return;
+    const data = await response.json();
+
+    tracks = data.tracks; // подменяем текущий список треков на треки плейлиста
+    renderTrackCards();
+    sectionTitleText.textContent = name;
+    backToLibraryLink.style.display = 'inline';
+  }
+
+  backToLibraryLink.addEventListener('click', async (e) => {
+    e.preventDefault();
+    sectionTitleText.textContent = 'Треки';
+    backToLibraryLink.style.display = 'none';
+    await loadTracksFromServer(); // возвращаем полный список из библиотеки
+  });
+
+  document.getElementById('new-playlist-btn').addEventListener('click', () => {
+    playlistModalBackdrop.classList.add('open');
+  });
+  document.getElementById('playlist-cancel-btn').addEventListener('click', () => {
+    playlistModalBackdrop.classList.remove('open');
+  });
+
+  playlistForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = document.getElementById('playlist-name-input').value;
+
+    const response = await fetch('/api/playlists', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    });
+
+    if (!response.ok){
+      playlistStatus.textContent = 'Не получилось создать плейлист.';
+      playlistStatus.className = 'upload-status error';
+      return;
+    }
+
+    await loadPlaylists();
+    playlistForm.reset();
+    playlistModalBackdrop.classList.remove('open');
+    playlistStatus.textContent = '';
+  });
+
+  // Всплывающее мини-меню "в какой плейлист добавить этот трек"
+  function openAddToPlaylistPopover(buttonEl, trackId){
+    if (myPlaylists.length === 0){
+      popover.innerHTML = `<div class="popover-empty">Сначала создай плейлист (кнопка "+" в сайдбаре)</div>`;
+    } else {
+      popover.innerHTML = myPlaylists.map(p =>
+        `<div class="popover-item" data-playlist-id="${p.id}">${p.name}</div>`
+      ).join('');
+    }
+
+    // Позиционируем попап прямо под кнопкой, на которую нажали.
+    const rect = buttonEl.getBoundingClientRect();
+    popover.style.top = (rect.bottom + 6) + 'px';
+    popover.style.left = Math.min(rect.left, window.innerWidth - 200) + 'px';
+    popover.classList.add('open');
+
+    popover.querySelectorAll('.popover-item').forEach(item => {
+      item.addEventListener('click', async () => {
+        const playlistId = item.dataset.playlistId;
+        await fetch(`/api/playlists/${playlistId}/tracks`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ trackId })
+        });
+        popover.classList.remove('open');
+      });
+    });
+  }
+
+  // Клик в любом другом месте страницы закрывает попап.
+  document.addEventListener('click', (e) => {
+    if (!popover.contains(e.target) && !e.target.classList.contains('add-to-playlist-btn')){
+      popover.classList.remove('open');
+    }
+  });
+
   // Клик по тёмному фону (не по самому окну) закрывает модалку — так удобнее.
-  [modalBackdrop, authModalBackdrop].forEach(backdrop => {
+  [modalBackdrop, authModalBackdrop, playlistModalBackdrop].forEach(backdrop => {
     backdrop.addEventListener('click', (e) => {
       if (e.target === backdrop) backdrop.classList.remove('open');
     });
