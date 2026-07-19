@@ -4,241 +4,308 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Vynl — твой музыкальный плеер</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
+  /* ==========================================================
+     VYNL · тема «Aurora»
+     Матовое стекло поверх живого сияющего фона.
+     Светлая тема — база, тёмная и ручной выбор темы переопределяют токены.
+     ========================================================== */
   :root{
-    --bg: #14121a;
-    --surface: #1e1b26;
-    --card: #262230;
-    --card-hover: #2e293a;
-    --text: #f2ede4;
-    --text-dim: #948f9e;
-    --accent: #e8a33d;
-    --accent-dim: #a9793a;
-    --teal: #4f7873;
-    --border: rgba(242,237,228,0.08);
+    --bg:#e7eaf4;
+    --text:#12141d;
+    --dim:#5f6579;
+    --accent:#6a5cff;
+    --accent-2:#48cebe;
+    --glass:rgba(255,255,255,.6);
+    --glass-strong:rgba(255,255,255,.72);
+    --glass-line:rgba(255,255,255,.85);
+    --card:rgba(255,255,255,.5);
+    --card-hover:rgba(255,255,255,.72);
+    --gA:rgba(96,150,255,.30);
+    --gB:rgba(150,110,240,.24);
+    --gC:rgba(72,206,190,.20);
+    --shadow:0 22px 54px rgba(60,70,130,.20);
+    --danger:#d6455f;
+    --ok:#1f9d78;
   }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#070912; --text:#eef1f8; --dim:#8890a4; --accent:#8f82ff; --accent-2:#54d8c6;
+      --glass:rgba(255,255,255,.06); --glass-strong:rgba(255,255,255,.09);
+      --glass-line:rgba(255,255,255,.12); --card:rgba(255,255,255,.05); --card-hover:rgba(255,255,255,.1);
+      --gA:rgba(80,130,255,.24); --gB:rgba(150,90,240,.20); --gC:rgba(60,200,180,.16);
+      --shadow:0 22px 54px rgba(0,0,0,.55); --danger:#ff7089; --ok:#4fd6a8;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#070912; --text:#eef1f8; --dim:#8890a4; --accent:#8f82ff; --accent-2:#54d8c6;
+    --glass:rgba(255,255,255,.06); --glass-strong:rgba(255,255,255,.09);
+    --glass-line:rgba(255,255,255,.12); --card:rgba(255,255,255,.05); --card-hover:rgba(255,255,255,.1);
+    --gA:rgba(80,130,255,.24); --gB:rgba(150,90,240,.20); --gC:rgba(60,200,180,.16);
+    --shadow:0 22px 54px rgba(0,0,0,.55); --danger:#ff7089; --ok:#4fd6a8;
+  }
+  :root[data-theme="light"]{
+    --bg:#e7eaf4; --text:#12141d; --dim:#5f6579; --accent:#6a5cff; --accent-2:#48cebe;
+    --glass:rgba(255,255,255,.6); --glass-strong:rgba(255,255,255,.72);
+    --glass-line:rgba(255,255,255,.85); --card:rgba(255,255,255,.5); --card-hover:rgba(255,255,255,.72);
+    --gA:rgba(96,150,255,.30); --gB:rgba(150,110,240,.24); --gC:rgba(72,206,190,.20);
+    --shadow:0 22px 54px rgba(60,70,130,.20); --danger:#d6455f; --ok:#1f9d78;
+  }
+
   *{box-sizing:border-box; margin:0; padding:0;}
   body{
-    background: var(--bg);
-    color: var(--text);
-    font-family: 'Inter', sans-serif;
-    height: 100vh;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
-  h1,h2,h3, .display{ font-family: 'Fraunces', serif; }
-
-  .app{ display:flex; flex:1; min-height:0; }
-
-  /* SIDEBAR */
-  .sidebar{
-    width: 240px;
-    background: var(--surface);
-    padding: 28px 20px;
+    background:var(--bg);
+    color:var(--text);
+    font-family:"Segoe UI Variable Display","Segoe UI",system-ui,-apple-system,sans-serif;
+    height:100vh;
+    overflow:hidden;
     display:flex;
     flex-direction:column;
-    gap: 32px;
-    border-right: 1px solid var(--border);
+    position:relative;
   }
-  .brand{ display:flex; align-items:center; gap:10px; }
+  /* Живое сияние-аврора за всем интерфейсом */
+  body::before{
+    content:'';
+    position:fixed; inset:-40%;
+    z-index:0; pointer-events:none;
+    background:
+      radial-gradient(closest-side, var(--gA), transparent 70%) 15% 10%/55% 55% no-repeat,
+      radial-gradient(closest-side, var(--gB), transparent 70%) 85% 25%/60% 60% no-repeat,
+      radial-gradient(closest-side, var(--gC), transparent 70%) 55% 95%/55% 55% no-repeat;
+    animation:aurora-drift 18s ease-in-out infinite alternate;
+  }
+  @keyframes aurora-drift{
+    0%{transform:translate(0,0) scale(1);}
+    50%{transform:translate(4%,-3%) scale(1.08);}
+    100%{transform:translate(-3%,4%) scale(1.04);}
+  }
+
+  .app{ display:flex; flex:1; min-height:0; position:relative; z-index:1; padding:16px; gap:16px; }
+
+  /* ---------- SIDEBAR ---------- */
+  .sidebar{
+    width:236px;
+    background:var(--glass);
+    border:1px solid var(--glass-line);
+    border-radius:22px;
+    backdrop-filter:blur(22px); -webkit-backdrop-filter:blur(22px);
+    padding:24px 20px;
+    display:flex; flex-direction:column; gap:26px;
+    box-shadow:var(--shadow);
+  }
+  .brand{ display:flex; align-items:center; gap:11px; }
   .brand-mark{
-    width: 30px; height:30px; border-radius:50%;
-    background: radial-gradient(circle at 35% 35%, #3a3548, #14121a 70%);
-    border: 2px solid var(--accent);
-    position:relative;
+    width:26px; height:26px; border-radius:8px;
+    background:conic-gradient(from 45deg, #6096ff, #9670f0, #48cebe, #6096ff);
+    box-shadow:0 4px 14px rgba(106,92,255,.4);
   }
-  .brand-mark::after{
-    content:''; position:absolute; inset:0; margin:auto;
-    width:6px; height:6px; border-radius:50%; background: var(--accent);
-  }
-  .brand-name{ font-weight:700; font-size: 20px; letter-spacing: 0.5px;}
+  .brand-name{ font-weight:700; font-size:20px; letter-spacing:.01em; }
 
-  nav{ display:flex; flex-direction:column; gap:4px; }
+  nav{ display:flex; flex-direction:column; gap:3px; }
   .nav-item{
-    padding: 10px 12px; border-radius: 8px; color: var(--text-dim);
-    font-size: 14px; font-weight:500; cursor:pointer; transition: .15s;
-    display:flex; align-items:center; gap:10px;
+    padding:9px 12px; border-radius:12px; color:var(--dim);
+    font-size:14px; font-weight:500; cursor:pointer; transition:.15s;
+    display:flex; align-items:center; gap:11px;
   }
-  .nav-item:hover{ background: var(--card); color: var(--text); }
-  .nav-item.active{ background: var(--card); color: var(--accent); }
+  .nav-item svg{ width:18px; height:18px; opacity:.85; }
+  .nav-item:hover{ background:var(--card); color:var(--text); }
+  .nav-item.active{ background:var(--card); color:var(--text); font-weight:600; box-shadow:inset 0 0 0 1px var(--glass-line); }
+  .nav-item.active svg{ color:var(--accent); opacity:1; }
 
-  .playlists{ display:flex; flex-direction:column; gap:2px; flex:1; overflow-y:auto; }
-  .playlists h3{ font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color: var(--text-dim); font-family:'Inter'; font-weight:600; margin-bottom:8px; }
-  .playlist-item{ padding: 7px 12px; border-radius:6px; font-size:13.5px; color:var(--text-dim); cursor:pointer; }
-  .playlist-item:hover{ background: var(--card); color: var(--text); }
+  .playlists{ display:flex; flex-direction:column; gap:2px; flex:1; min-height:0; overflow-y:auto; }
+  .playlists h3{
+    font-size:10.5px; text-transform:uppercase; letter-spacing:.18em; color:var(--dim);
+    font-weight:700; margin-bottom:10px; display:flex; align-items:center; justify-content:space-between;
+  }
+  .playlists h3 button{ background:none; border:none; color:var(--dim); cursor:pointer; font-size:16px; line-height:1; }
+  .playlists h3 button:hover{ color:var(--accent); }
+  .playlist-item{ padding:7px 12px; margin:0 -8px; border-radius:10px; font-size:13.5px; color:var(--dim); cursor:pointer; }
+  .playlist-item:hover{ background:var(--card); color:var(--text); }
 
-  .auth-area{ border-top: 1px solid var(--border); padding-top: 16px; }
-  .auth-user-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
-  .auth-username{ font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .auth-logout-btn{ background:none; border:none; color: var(--text-dim); font-size:12px; cursor:pointer; text-decoration:underline; }
-  .auth-logout-btn:hover{ color: var(--text); }
+  .auth-area{ border-top:1px solid var(--glass-line); padding-top:16px; }
+  .auth-user-row{ display:flex; align-items:center; gap:10px; }
+  .auth-ava{
+    width:30px; height:30px; border-radius:50%; flex-shrink:0;
+    background:conic-gradient(from 45deg, #6096ff, #9670f0, #48cebe, #6096ff);
+    color:#fff; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center;
+  }
+  .auth-username{ font-size:13.5px; font-weight:600; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .auth-logout-btn{ background:none; border:none; color:var(--dim); font-size:12px; cursor:pointer; }
+  .auth-logout-btn:hover{ color:var(--text); }
 
-  /* MAIN */
-  main{ flex:1; overflow-y:auto; padding: 32px 40px 140px; }
+  /* ---------- MAIN ---------- */
+  main{ flex:1; overflow-y:auto; padding:8px 26px 150px; min-width:0; }
+
+  /* Верхняя строка: приветствие + переключатель темы */
+  .topbar{ display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:22px; }
+  .greeting{ font-size:13px; color:var(--dim); }
+  .theme-toggle{
+    width:38px; height:38px; border-radius:12px; flex-shrink:0;
+    background:var(--glass); border:1px solid var(--glass-line);
+    backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+    color:var(--text); cursor:pointer; display:flex; align-items:center; justify-content:center;
+  }
+  .theme-toggle:hover{ color:var(--accent); }
+
+  /* Герой «Сейчас играет» */
   .hero{
-    background: linear-gradient(135deg, #2e2438, #1a1720 70%);
-    border: 1px solid var(--border);
-    border-radius: 18px;
-    padding: 36px 40px;
-    margin-bottom: 36px;
-    position: relative;
-    overflow: hidden;
+    display:flex; gap:24px; align-items:center;
+    background:var(--glass); border:1px solid var(--glass-line); border-radius:26px;
+    backdrop-filter:blur(22px); -webkit-backdrop-filter:blur(22px);
+    padding:24px; margin-bottom:30px; box-shadow:var(--shadow);
   }
-  .hero-eyebrow{ color: var(--accent); font-size:12px; letter-spacing:2px; text-transform:uppercase; font-weight:600; }
-  .hero h1{ font-size: 40px; margin: 10px 0 8px; font-weight:600; }
-  .hero p{ color: var(--text-dim); max-width: 480px; font-size:14.5px; line-height:1.5; }
-
-  .section-title{ font-size:19px; font-weight:600; margin: 32px 0 16px; }
-
-  .grid{
-    display:grid;
-    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-    gap: 20px;
-  }
-  .track-card{
-    background: var(--card);
-    border-radius: 12px;
-    padding: 14px;
-    cursor:pointer;
-    transition: .15s;
-    border: 1px solid transparent;
-  }
-  .track-card:hover{ background: var(--card-hover); border-color: var(--border); transform: translateY(-2px); }
-  .cover{
-    width:100%; aspect-ratio:1; border-radius:8px; margin-bottom:12px;
+  .hero-cover{
+    width:132px; height:132px; border-radius:18px; flex-shrink:0;
+    box-shadow:var(--shadow); background:var(--card);
     display:flex; align-items:center; justify-content:center;
-    font-family:'Fraunces'; font-size:15px; font-weight:600; color: rgba(20,18,26,0.75);
+    font-size:30px; font-weight:700; color:rgba(255,255,255,.9); text-shadow:0 1px 6px rgba(0,0,0,.3);
+  }
+  .hero-body{ min-width:0; }
+  .hero-eyebrow{ font-size:10.5px; letter-spacing:.2em; text-transform:uppercase; color:var(--accent); font-weight:700; }
+  .hero-title{ font-size:32px; font-weight:700; letter-spacing:-.02em; margin:6px 0 2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .hero-artist{ color:var(--dim); font-size:14px; margin-bottom:16px; }
+  .hero-eq{ display:flex; align-items:flex-end; gap:4px; height:22px; }
+  .hero-eq span{ width:4px; background:var(--accent); border-radius:2px; height:30%; animation:eq 1.1s ease-in-out infinite; animation-play-state:paused; }
+  .hero-eq.playing span{ animation-play-state:running; }
+  .hero-eq span:nth-child(1){ height:40%; animation-delay:0s; }
+  .hero-eq span:nth-child(2){ height:90%; animation-delay:.2s; }
+  .hero-eq span:nth-child(3){ height:60%; animation-delay:.4s; }
+  .hero-eq span:nth-child(4){ height:100%; animation-delay:.1s; }
+  .hero-eq span:nth-child(5){ height:50%; animation-delay:.3s; }
+  @keyframes eq{ 0%,100%{ transform:scaleY(.4); } 50%{ transform:scaleY(1); } }
+
+  /* Заголовок секции + действия */
+  .section-head{ display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:18px; }
+  .section-title{ font-size:19px; font-weight:700; display:flex; align-items:center; gap:12px; }
+  .back-link{ font-size:13px; font-weight:500; color:var(--dim); cursor:pointer; }
+  .back-link:hover{ color:var(--accent); }
+
+  .grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(168px,1fr)); gap:18px; }
+  .track-card{
+    background:var(--card); border:1px solid var(--glass-line); border-radius:16px;
+    padding:12px; cursor:pointer; transition:transform .18s ease, background .15s;
+    backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+  }
+  .track-card:hover{ transform:translateY(-4px); background:var(--card-hover); }
+  .cover{
+    width:100%; aspect-ratio:1; border-radius:11px; margin-bottom:11px;
+    display:flex; align-items:center; justify-content:center;
+    font-size:16px; font-weight:700; color:rgba(255,255,255,.92); text-shadow:0 1px 6px rgba(0,0,0,.3);
     position:relative;
   }
-  .track-title{ font-size:14px; font-weight:600; margin-bottom:3px; }
-  .track-artist{ font-size:12.5px; color: var(--text-dim); }
-  .track-card.playing .track-title{ color: var(--accent); }
+  .track-title{ font-size:14px; font-weight:600; margin-bottom:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .track-artist{ font-size:12.5px; color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .track-card.playing .track-title{ color:var(--accent); }
 
   .add-to-playlist-btn{
-    position:absolute; top:6px; right:6px; width:22px; height:22px; border-radius:50%;
-    background: rgba(20,18,26,0.55); border:none; color:#fff; font-size:15px; line-height:1;
-    cursor:pointer; opacity:0; transition:.15s;
+    position:absolute; top:8px; right:8px; width:26px; height:26px; border-radius:50%;
+    background:rgba(10,12,20,.5); border:none; color:#fff; font-size:16px; line-height:1;
+    cursor:pointer; opacity:0; transition:.15s; display:flex; align-items:center; justify-content:center;
+    backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
   }
   .track-card:hover .add-to-playlist-btn{ opacity:1; }
-  .add-to-playlist-btn:hover{ background: var(--accent); }
+  .add-to-playlist-btn:hover{ background:var(--accent); }
 
   .add-to-playlist-popover{
-    display:none; position:fixed; z-index:60; background: var(--surface);
-    border:1px solid var(--border); border-radius: 10px; padding:6px; min-width:180px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    display:none; position:fixed; z-index:60;
+    background:var(--glass-strong); border:1px solid var(--glass-line); border-radius:14px; padding:6px; min-width:190px;
+    backdrop-filter:blur(22px); -webkit-backdrop-filter:blur(22px); box-shadow:var(--shadow);
   }
   .add-to-playlist-popover.open{ display:block; }
-  .popover-item{ padding:7px 10px; border-radius:6px; font-size:13px; cursor:pointer; color: var(--text); }
-  .popover-item:hover{ background: var(--card); }
-  .popover-empty{ padding:7px 10px; font-size:12.5px; color: var(--text-dim); }
+  .popover-item{ padding:8px 11px; border-radius:9px; font-size:13px; cursor:pointer; color:var(--text); }
+  .popover-item:hover{ background:var(--card); }
+  .popover-empty{ padding:8px 11px; font-size:12.5px; color:var(--dim); }
 
-  /* PLAYER BAR */
+  /* ---------- PLAYER BAR (плавающая стеклянная панель) ---------- */
   .player-bar{
-    height: 96px;
-    background: var(--surface);
-    border-top: 1px solid var(--border);
-    display:flex;
-    align-items:center;
-    padding: 0 24px;
-    gap: 20px;
+    position:fixed; left:16px; right:16px; bottom:16px; z-index:5;
+    height:82px;
+    background:var(--glass); border:1px solid var(--glass-line); border-radius:20px;
+    backdrop-filter:blur(24px); -webkit-backdrop-filter:blur(24px); box-shadow:var(--shadow);
+    display:flex; align-items:center; padding:0 22px; gap:22px;
   }
-  .now-playing{ display:flex; align-items:center; gap:14px; width: 280px; min-width:0; }
-
-  .vinyl{
-    width: 60px; height:60px; border-radius:50%;
-    background: repeating-radial-gradient(circle, #0d0c11 0px, #0d0c11 2px, #1a1720 3px, #1a1720 4px);
-    display:flex; align-items:center; justify-content:center;
-    flex-shrink:0;
-    animation: spin 3s linear infinite;
-    animation-play-state: paused;
-    border: 1px solid var(--border);
+  .now-playing{ display:flex; align-items:center; gap:13px; width:250px; min-width:0; }
+  .np-cover{
+    width:52px; height:52px; border-radius:11px; flex-shrink:0; background:var(--card);
+    box-shadow:var(--shadow); display:flex; align-items:center; justify-content:center;
+    font-size:14px; font-weight:700; color:rgba(255,255,255,.9); text-shadow:0 1px 4px rgba(0,0,0,.3);
   }
-  .vinyl.spinning{ animation-play-state: running; }
-  .vinyl-label{
-    width: 22px; height:22px; border-radius:50%;
-    display:flex; align-items:center; justify-content:center;
-  }
-  @keyframes spin{ from{transform:rotate(0)} to{transform:rotate(360deg)} }
-
   .now-playing-info{ min-width:0; }
-  .now-playing-title{ font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .now-playing-artist{ font-size:12px; color: var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .now-playing-title{ font-size:14px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .now-playing-artist{ font-size:12px; color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
-  .controls{ flex:1; display:flex; flex-direction:column; align-items:center; gap:8px; max-width: 560px; margin: 0 auto; }
-  .control-buttons{ display:flex; align-items:center; gap:20px; }
-  .btn-icon{
-    background:none; border:none; color: var(--text); cursor:pointer;
-    opacity:0.8; transition:.15s; padding:4px;
-  }
+  .controls{ flex:1; display:flex; flex-direction:column; align-items:center; gap:8px; max-width:560px; margin:0 auto; }
+  .control-buttons{ display:flex; align-items:center; gap:18px; }
+  .btn-icon{ background:none; border:none; color:var(--text); cursor:pointer; opacity:.82; transition:.15s; padding:4px; display:flex; }
   .btn-icon:hover{ opacity:1; }
   .play-btn{
-    width:36px; height:36px; border-radius:50%;
-    background: var(--text); color: var(--bg);
-    display:flex; align-items:center; justify-content:center;
-    opacity:1;
+    width:40px; height:40px; border-radius:50%; border:none;
+    background:var(--accent); color:#fff; display:flex; align-items:center; justify-content:center;
+    opacity:1; cursor:pointer; box-shadow:0 8px 22px rgba(106,92,255,.4);
   }
-  .play-btn:hover{ background: var(--accent); transform: scale(1.05); }
+  .play-btn:hover{ transform:scale(1.05); }
 
-  .progress-row{ display:flex; align-items:center; gap:10px; width:100%; }
-  .time{ font-family:'IBM Plex Mono'; font-size:11px; color: var(--text-dim); width:36px; }
+  .progress-row{ display:flex; align-items:center; gap:11px; width:100%; }
+  .time{ font-size:11px; color:var(--dim); width:36px; font-variant-numeric:tabular-nums; }
   .time.right{ text-align:right; }
-  .progress-track{
-    flex:1; height:4px; background: var(--card); border-radius:2px; position:relative; cursor:pointer;
-  }
-  .progress-fill{ position:absolute; left:0; top:0; height:100%; background: var(--accent); border-radius:2px; width:0%; }
-  .progress-track:hover .progress-fill{ background: #f2b45c; }
+  .progress-track{ flex:1; height:5px; background:var(--card); border:1px solid var(--glass-line); border-radius:3px; position:relative; cursor:pointer; }
+  .progress-fill{ position:absolute; left:-1px; top:-1px; bottom:-1px; height:auto; background:linear-gradient(90deg,#6096ff,#9670f0); border-radius:3px; width:0%; }
 
-  .volume-row{ width: 160px; display:flex; align-items:center; gap:8px; justify-content:flex-end; }
-  input[type=range]{
-    -webkit-appearance:none; width:90px; height:4px; background: var(--card); border-radius:2px; outline:none;
-  }
-  input[type=range]::-webkit-slider-thumb{
-    -webkit-appearance:none; width:11px; height:11px; border-radius:50%; background: var(--text); cursor:pointer;
-  }
+  .volume-row{ width:150px; display:flex; align-items:center; gap:9px; justify-content:flex-end; color:var(--dim); }
+  input[type=range]{ -webkit-appearance:none; appearance:none; width:96px; height:5px; background:var(--card); border:1px solid var(--glass-line); border-radius:3px; outline:none; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:13px; height:13px; border-radius:50%; background:var(--accent); cursor:pointer; box-shadow:0 2px 6px rgba(106,92,255,.5); }
+  input[type=range]::-moz-range-thumb{ width:13px; height:13px; border:none; border-radius:50%; background:var(--accent); cursor:pointer; }
 
-  ::-webkit-scrollbar{ width:8px; }
-  ::-webkit-scrollbar-thumb{ background: var(--card); border-radius:4px; }
+  ::-webkit-scrollbar{ width:9px; }
+  ::-webkit-scrollbar-thumb{ background:var(--card-hover); border-radius:5px; }
+  ::-webkit-scrollbar-track{ background:transparent; }
 
-  /* UPLOAD BUTTON + MODAL */
-  .upload-btn{
-    background: var(--card); color: var(--text); border: 1px solid var(--border);
-    padding: 9px 16px; border-radius: 8px; font-size: 13.5px; font-weight:600;
-    cursor:pointer; font-family:'Inter'; transition:.15s;
+  /* ---------- КНОПКИ / ФОРМЫ ---------- */
+  .btn-glass{
+    background:var(--card); color:var(--text); border:1px solid var(--glass-line);
+    padding:9px 16px; border-radius:12px; font-size:13.5px; font-weight:600;
+    cursor:pointer; font-family:inherit; transition:.15s;
+    backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
   }
-  .upload-btn:hover{ background: var(--card-hover); border-color: var(--accent); color: var(--accent); }
+  .btn-glass:hover{ background:var(--card-hover); color:var(--accent); }
 
   .modal-backdrop{
-    display:none; position:fixed; inset:0; background: rgba(10,9,13,0.7);
+    display:none; position:fixed; inset:0; background:rgba(6,9,18,.55);
+    backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px);
     align-items:center; justify-content:center; z-index:50;
   }
   .modal-backdrop.open{ display:flex; }
   .modal{
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 16px; padding: 28px 28px 22px; width: 360px;
+    background:var(--glass-strong); border:1px solid var(--glass-line); border-radius:20px;
+    backdrop-filter:blur(30px); -webkit-backdrop-filter:blur(30px); box-shadow:var(--shadow);
+    padding:28px 28px 22px; width:370px;
   }
-  .form-label{ display:block; font-size:12.5px; color: var(--text-dim); margin: 14px 0 6px; font-weight:500; }
+  .modal h3{ font-size:20px; font-weight:700; margin-bottom:18px; }
+  .form-label{ display:block; font-size:12.5px; color:var(--dim); margin:14px 0 6px; font-weight:600; }
   .form-label:first-of-type{ margin-top:0; }
   .form-input{
-    width:100%; background: var(--card); border: 1px solid var(--border); color: var(--text);
-    padding: 9px 12px; border-radius: 8px; font-size: 14px; font-family:'Inter';
+    width:100%; background:var(--card); border:1px solid var(--glass-line); color:var(--text);
+    padding:10px 12px; border-radius:11px; font-size:14px; font-family:inherit;
   }
-  .form-input:focus{ outline:none; border-color: var(--accent); }
+  .form-input:focus{ outline:none; border-color:var(--accent); }
+  .form-input::file-selector-button{
+    background:var(--card-hover); border:none; color:var(--text); font-family:inherit;
+    padding:6px 12px; border-radius:8px; margin-right:10px; cursor:pointer;
+  }
   .modal-actions{ display:flex; justify-content:flex-end; gap:10px; margin-top:22px; }
-  .btn-secondary, .btn-primary{
-    padding: 9px 16px; border-radius: 8px; font-size: 13.5px; font-weight:600;
-    cursor:pointer; border:none; font-family:'Inter';
+  .btn-secondary, .btn-primary{ padding:10px 18px; border-radius:12px; font-size:13.5px; font-weight:600; cursor:pointer; border:none; font-family:inherit; }
+  .btn-secondary{ background:none; color:var(--dim); }
+  .btn-secondary:hover{ color:var(--text); }
+  .btn-primary{ background:var(--accent); color:#fff; box-shadow:0 8px 22px rgba(106,92,255,.35); }
+  .btn-primary:hover{ filter:brightness(1.08); }
+  .btn-primary:disabled{ opacity:.6; cursor:not-allowed; }
+  .upload-status{ font-size:12.5px; margin-top:12px; color:var(--dim); min-height:16px; }
+  .upload-status.error{ color:var(--danger); }
+  .upload-status.success{ color:var(--ok); }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ transition:none !important; animation:none !important; }
   }
-  .btn-secondary{ background:none; color: var(--text-dim); }
-  .btn-secondary:hover{ color: var(--text); }
-  .btn-primary{ background: var(--accent); color: #1a1409; }
-  .btn-primary:hover{ background: #f2b45c; }
-  .btn-primary:disabled{ opacity:0.6; cursor:not-allowed; }
-  .upload-status{ font-size: 12.5px; margin-top:12px; color: var(--text-dim); min-height: 16px; }
-  .upload-status.error{ color: #d97757; }
-  .upload-status.success{ color: var(--accent); }
 </style>
 </head>
 <body>
@@ -250,47 +317,67 @@
       <div class="brand-name">Vynl</div>
     </div>
     <nav>
-      <div class="nav-item active">Главная</div>
-      <div class="nav-item">Поиск</div>
-      <div class="nav-item">Библиотека</div>
+      <div class="nav-item active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+        Главная
+      </div>
+      <div class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        Поиск
+      </div>
+      <div class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M4 10h12M4 15h8"/><circle cx="18" cy="16" r="3"/><path d="M21 16V7"/></svg>
+        Библиотека
+      </div>
     </nav>
     <div class="playlists">
-      <h3 style="display:flex; align-items:center; justify-content:space-between;">
+      <h3>
         <span>Плейлисты</span>
-        <button id="new-playlist-btn" title="Новый плейлист" style="background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:15px; line-height:1;">+</button>
+        <button id="new-playlist-btn" title="Новый плейлист">+</button>
       </h3>
       <div id="playlist-list">
-        <div class="playlist-item" style="color:var(--text-dim); cursor:default;">Войди, чтобы создавать плейлисты</div>
+        <div class="playlist-item" style="cursor:default;">Войди, чтобы создавать плейлисты</div>
       </div>
     </div>
 
     <div class="auth-area" id="auth-area">
-      <button class="upload-btn" id="auth-open-btn" style="width:100%;">Войти</button>
+      <button class="btn-glass" id="auth-open-btn" style="width:100%;">Войти</button>
     </div>
   </aside>
 
   <main>
-    <div class="hero">
-      <div class="hero-eyebrow">Прототип · демо-треки</div>
-      <h1 class="display">Твой первый плеер</h1>
-      <p>Это рабочий каркас: плитки треков, плеер снизу, прогресс и громкость — всё кликабельно. Дальше будем подключать настоящий бэкенд, базу треков и учётные записи.</p>
+    <div class="topbar">
+      <div class="greeting" id="greeting">Добро пожаловать в Vynl</div>
+      <button class="theme-toggle" id="theme-toggle" title="Сменить тему" aria-label="Сменить тему">
+        <svg id="theme-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      </button>
     </div>
 
-    <div class="section-title display" style="display:flex; align-items:center; justify-content:space-between;">
-      <span>
-        <span id="section-title-text">Треки</span>
-        <a href="#" id="back-to-library-link" style="display:none; font-size:13px; font-family:'Inter'; font-weight:500; color:var(--text-dim); margin-left:12px; text-decoration:underline;">← Ко всем трекам</a>
-      </span>
-      <button id="upload-open-btn" class="upload-btn">+ Добавить трек</button>
+    <section class="hero">
+      <div class="hero-cover" id="hero-cover">♪</div>
+      <div class="hero-body">
+        <div class="hero-eyebrow">Сейчас играет</div>
+        <div class="hero-title" id="hero-title">Выбери трек</div>
+        <div class="hero-artist" id="hero-artist">Нажми на любую карточку, чтобы начать</div>
+        <div class="hero-eq" id="hero-eq"><span></span><span></span><span></span><span></span><span></span></div>
+      </div>
+    </section>
+
+    <div class="section-head">
+      <div class="section-title">
+        <span id="section-title-text">Библиотека</span>
+        <span id="back-to-library-link" class="back-link" style="display:none;">← Ко всем трекам</span>
+      </div>
+      <button id="upload-open-btn" class="btn-glass">+ Добавить трек</button>
     </div>
     <div class="grid" id="track-grid"></div>
   </main>
 </div>
 
-<!-- Модальное окно (всплывающая форма) для загрузки трека -->
+<!-- Модальное окно загрузки трека -->
 <div class="modal-backdrop" id="modal-backdrop">
   <div class="modal">
-    <h3 class="display" style="margin-bottom:18px;">Добавить трек</h3>
+    <h3>Добавить трек</h3>
     <form id="upload-form">
       <label class="form-label">Название трека</label>
       <input type="text" id="input-title" class="form-input" required>
@@ -313,7 +400,7 @@
 <!-- Модальное окно входа / регистрации -->
 <div class="modal-backdrop" id="auth-modal-backdrop">
   <div class="modal">
-    <h3 class="display" id="auth-modal-title" style="margin-bottom:18px;">Вход</h3>
+    <h3 id="auth-modal-title">Вход</h3>
     <form id="auth-form">
       <label class="form-label">Имя пользователя</label>
       <input type="text" id="auth-username" class="form-input" required>
@@ -330,10 +417,10 @@
   </div>
 </div>
 
-<!-- Модальное окно создания нового плейлиста -->
+<!-- Модальное окно создания плейлиста -->
 <div class="modal-backdrop" id="playlist-modal-backdrop">
   <div class="modal">
-    <h3 class="display" style="margin-bottom:18px;">Новый плейлист</h3>
+    <h3>Новый плейлист</h3>
     <form id="playlist-form">
       <label class="form-label">Название</label>
       <input type="text" id="playlist-name-input" class="form-input" required>
@@ -346,14 +433,12 @@
   </div>
 </div>
 
-<!-- Маленькое всплывающее меню "добавить трек в плейлист" -->
+<!-- Мини-меню «добавить трек в плейлист» -->
 <div class="add-to-playlist-popover" id="add-to-playlist-popover"></div>
 
 <div class="player-bar">
   <div class="now-playing">
-    <div class="vinyl" id="vinyl">
-      <div class="vinyl-label" id="vinyl-label"></div>
-    </div>
+    <div class="np-cover" id="np-cover">♪</div>
     <div class="now-playing-info">
       <div class="now-playing-title" id="np-title">Выбери трек</div>
       <div class="now-playing-artist" id="np-artist">—</div>
@@ -382,7 +467,7 @@
   </div>
 
   <div class="volume-row">
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="color:var(--text-dim)"><path d="M3 9v6h4l5 5V4L7 9H3z"/></svg>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3z"/></svg>
     <input type="range" id="volume" min="0" max="100" value="70">
   </div>
 </div>
@@ -390,22 +475,50 @@
 <audio id="audio"></audio>
 
 <script>
-  // Раньше список треков был прямо здесь, в коде.
-  // Теперь мы его СПРАШИВАЕМ у сервера — это и называется "запрос к API".
+  // ---------- Тема (светлая / тёмная), выбор запоминается ----------
+  (function(){
+    var saved = null;
+    try { saved = localStorage.getItem('vynl-theme'); } catch(e){}
+    if (saved) document.documentElement.setAttribute('data-theme', saved);
+
+    var sun = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>';
+    var moon = '<path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/>';
+    var icon = document.getElementById('theme-icon');
+
+    function isDark(){
+      var t = document.documentElement.getAttribute('data-theme');
+      if (t) return t === 'dark';
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+    function syncIcon(){ icon.innerHTML = isDark() ? sun : moon; }
+    syncIcon();
+
+    document.getElementById('theme-toggle').addEventListener('click', function(){
+      var next = isDark() ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem('vynl-theme', next); } catch(e){}
+      syncIcon();
+    });
+  })();
+
+  // ---------- Данные треков берём с сервера ----------
   let tracks = [];
 
   async function loadTracksFromServer(){
-    const response = await fetch('/api/tracks'); // делаем запрос на наш сервер
-    tracks = await response.json();              // превращаем ответ в обычный JS-массив
-    renderTrackCards();                           // теперь, когда данные пришли, рисуем карточки
+    const response = await fetch('/api/tracks');
+    tracks = await response.json();
+    renderTrackCards();
   }
 
   const grid = document.getElementById('track-grid');
   const audio = document.getElementById('audio');
   const playBtn = document.getElementById('play-btn');
   const playIcon = document.getElementById('play-icon');
-  const vinyl = document.getElementById('vinyl');
-  const vinylLabel = document.getElementById('vinyl-label');
+  const heroCover = document.getElementById('hero-cover');
+  const heroTitle = document.getElementById('hero-title');
+  const heroArtist = document.getElementById('hero-artist');
+  const heroEq = document.getElementById('hero-eq');
+  const npCover = document.getElementById('np-cover');
   const npTitle = document.getElementById('np-title');
   const npArtist = document.getElementById('np-artist');
   const progressFill = document.getElementById('progress-fill');
@@ -419,14 +532,17 @@
 
   function initials(title){ return title.trim().slice(0,2).toUpperCase(); }
 
+  // Обложка — мягкий градиент из цвета трека, чтобы стекло смотрелось объёмно.
+  function coverBg(color){ return 'linear-gradient(150deg, ' + color + ', rgba(7,9,18,0.85))'; }
+
   function renderTrackCards(){
-    grid.innerHTML = ''; // на случай повторного вызова — чистим сетку перед отрисовкой
+    grid.innerHTML = '';
     tracks.forEach((t, i) => {
       const card = document.createElement('div');
       card.className = 'track-card';
       card.id = 'card-' + i;
       card.innerHTML = `
-        <div class="cover" style="background:${t.color}">
+        <div class="cover" style="background:${coverBg(t.color)}">
           ${initials(t.title)}
           <button class="add-to-playlist-btn" data-track-id="${t.id}" title="Добавить в плейлист">+</button>
         </div>
@@ -435,16 +551,16 @@
       `;
       card.addEventListener('click', () => loadTrack(i, true));
       card.querySelector('.add-to-playlist-btn').addEventListener('click', (e) => {
-        e.stopPropagation(); // чтобы клик по "+" не запускал воспроизведение трека
+        e.stopPropagation();
         openAddToPlaylistPopover(e.currentTarget, t.id);
       });
       grid.appendChild(card);
     });
   }
 
-  loadTracksFromServer(); // запускаем загрузку треков сразу при открытии страницы
+  loadTracksFromServer();
 
-  // --- Загрузка своего трека ---
+  // ---------- Загрузка своего трека ----------
   const modalBackdrop = document.getElementById('modal-backdrop');
   const uploadForm = document.getElementById('upload-form');
   const uploadStatus = document.getElementById('upload-status');
@@ -457,13 +573,12 @@
   });
 
   uploadForm.addEventListener('submit', async (e) => {
-    e.preventDefault(); // не даём странице перезагрузиться, как это делает обычная форма
+    e.preventDefault();
 
     const title = document.getElementById('input-title').value;
     const artist = document.getElementById('input-artist').value;
     const file = document.getElementById('input-file').files[0];
 
-    // FormData — специальный объект для отправки файлов (обычный JSON для этого не подходит).
     const formData = new FormData();
     formData.append('title', title);
     formData.append('artist', artist);
@@ -473,30 +588,25 @@
     uploadStatus.className = 'upload-status';
 
     try {
-      const response = await fetch('/api/tracks', {
-        method: 'POST',        // POST значит "отправляю новые данные", а не просто "дай мне данные"
-        body: formData         // тело запроса — сам файл и текстовые поля
-      });
-
+      const response = await fetch('/api/tracks', { method: 'POST', body: formData });
       if (!response.ok) throw new Error('Сервер отклонил запрос');
 
       uploadStatus.textContent = 'Готово!';
       uploadStatus.className = 'upload-status success';
 
-      await loadTracksFromServer(); // подтягиваем обновлённый список треков с сервера
+      await loadTracksFromServer();
       uploadForm.reset();
       setTimeout(() => {
         modalBackdrop.classList.remove('open');
         uploadStatus.textContent = '';
       }, 700);
-
     } catch (err) {
       uploadStatus.textContent = 'Ошибка загрузки. Попробуй ещё раз.';
       uploadStatus.className = 'upload-status error';
     }
   });
 
-  // --- Регистрация / вход ---
+  // ---------- Регистрация / вход ----------
   const authArea = document.getElementById('auth-area');
   const authModalBackdrop = document.getElementById('auth-modal-backdrop');
   const authForm = document.getElementById('auth-form');
@@ -504,13 +614,15 @@
   const authModalTitle = document.getElementById('auth-modal-title');
   const authSwitchBtn = document.getElementById('auth-switch-mode-btn');
   const authSubmitBtn = document.getElementById('auth-submit-btn');
+  const greeting = document.getElementById('greeting');
 
-  let authMode = 'login'; // или 'register'
+  let authMode = 'login';
 
   function renderAuthArea(user){
     if (user){
       authArea.innerHTML = `
         <div class="auth-user-row">
+          <span class="auth-ava">${initials(user.username)}</span>
           <span class="auth-username">${user.username}</span>
           <button class="auth-logout-btn" id="logout-btn">Выйти</button>
         </div>
@@ -518,18 +630,18 @@
       document.getElementById('logout-btn').addEventListener('click', async () => {
         await fetch('/api/logout', { method: 'POST' });
         renderAuthArea(null);
+        greeting.textContent = 'Добро пожаловать в Vynl';
       });
-      loadPlaylists(); // теперь, когда мы знаем, что пользователь вошёл — подгружаем его плейлисты
+      greeting.textContent = 'С возвращением, ' + user.username;
+      loadPlaylists();
     } else {
-      authArea.innerHTML = `<button class="upload-btn" id="auth-open-btn" style="width:100%;">Войти</button>`;
+      authArea.innerHTML = `<button class="btn-glass" id="auth-open-btn" style="width:100%;">Войти</button>`;
       document.getElementById('auth-open-btn').addEventListener('click', openAuthModal);
-      renderPlaylistList([]); // выходим — очищаем список плейлистов в сайдбаре
+      renderPlaylistList([]);
     }
   }
 
-  function openAuthModal(){
-    authModalBackdrop.classList.add('open');
-  }
+  function openAuthModal(){ authModalBackdrop.classList.add('open'); }
 
   function setAuthMode(mode){
     authMode = mode;
@@ -561,7 +673,7 @@
     try {
       const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }, // говорим серверу, что тело — JSON
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
       });
       const data = await response.json();
@@ -576,15 +688,12 @@
       authForm.reset();
       authModalBackdrop.classList.remove('open');
       authStatus.textContent = '';
-
     } catch (err) {
       authStatus.textContent = 'Ошибка соединения с сервером.';
       authStatus.className = 'upload-status error';
     }
   });
 
-  // При открытии страницы спрашиваем сервер: "а я уже вошёл?"
-  // (сервер поймёт это по cookie, которую сам же выдал при предыдущем входе)
   async function checkCurrentUser(){
     const response = await fetch('/api/me');
     const data = await response.json();
@@ -592,32 +701,31 @@
   }
   checkCurrentUser();
 
-  // --- Плейлисты ---
+  // ---------- Плейлисты ----------
   const playlistListEl = document.getElementById('playlist-list');
   const playlistModalBackdrop = document.getElementById('playlist-modal-backdrop');
   const playlistForm = document.getElementById('playlist-form');
   const playlistStatus = document.getElementById('playlist-status');
   const popover = document.getElementById('add-to-playlist-popover');
 
-  let myPlaylists = []; // список плейлистов текущего пользователя, храним в памяти
+  let myPlaylists = [];
 
   async function loadPlaylists(){
     const response = await fetch('/api/playlists');
-    if (!response.ok) return; // не вошли — просто ничего не показываем
+    if (!response.ok) return;
     myPlaylists = await response.json();
     renderPlaylistList(myPlaylists);
   }
 
   function renderPlaylistList(playlists){
     if (playlists.length === 0){
-      playlistListEl.innerHTML = `<div class="playlist-item" style="color:var(--text-dim); cursor:default;">Пока нет плейлистов</div>`;
+      playlistListEl.innerHTML = `<div class="playlist-item" style="cursor:default;">Пока нет плейлистов</div>`;
       return;
     }
     playlistListEl.innerHTML = playlists.map(p =>
       `<div class="playlist-item" data-playlist-id="${p.id}">${p.name}</div>`
     ).join('');
 
-    // Клик по плейлисту — показываем только его треки в основной сетке.
     playlistListEl.querySelectorAll('.playlist-item[data-playlist-id]').forEach(el => {
       el.addEventListener('click', () => openPlaylistView(el.dataset.playlistId, el.textContent));
     });
@@ -631,17 +739,16 @@
     if (!response.ok) return;
     const data = await response.json();
 
-    tracks = data.tracks; // подменяем текущий список треков на треки плейлиста
+    tracks = data.tracks;
     renderTrackCards();
     sectionTitleText.textContent = name;
     backToLibraryLink.style.display = 'inline';
   }
 
-  backToLibraryLink.addEventListener('click', async (e) => {
-    e.preventDefault();
-    sectionTitleText.textContent = 'Треки';
+  backToLibraryLink.addEventListener('click', async () => {
+    sectionTitleText.textContent = 'Библиотека';
     backToLibraryLink.style.display = 'none';
-    await loadTracksFromServer(); // возвращаем полный список из библиотеки
+    await loadTracksFromServer();
   });
 
   document.getElementById('new-playlist-btn').addEventListener('click', () => {
@@ -673,20 +780,18 @@
     playlistStatus.textContent = '';
   });
 
-  // Всплывающее мини-меню "в какой плейлист добавить этот трек"
   function openAddToPlaylistPopover(buttonEl, trackId){
     if (myPlaylists.length === 0){
-      popover.innerHTML = `<div class="popover-empty">Сначала создай плейлист (кнопка "+" в сайдбаре)</div>`;
+      popover.innerHTML = `<div class="popover-empty">Сначала создай плейлист (кнопка «+» в сайдбаре)</div>`;
     } else {
       popover.innerHTML = myPlaylists.map(p =>
         `<div class="popover-item" data-playlist-id="${p.id}">${p.name}</div>`
       ).join('');
     }
 
-    // Позиционируем попап прямо под кнопкой, на которую нажали.
     const rect = buttonEl.getBoundingClientRect();
     popover.style.top = (rect.bottom + 6) + 'px';
-    popover.style.left = Math.min(rect.left, window.innerWidth - 200) + 'px';
+    popover.style.left = Math.min(rect.left, window.innerWidth - 210) + 'px';
     popover.classList.add('open');
 
     popover.querySelectorAll('.popover-item').forEach(item => {
@@ -702,20 +807,19 @@
     });
   }
 
-  // Клик в любом другом месте страницы закрывает попап.
   document.addEventListener('click', (e) => {
     if (!popover.contains(e.target) && !e.target.classList.contains('add-to-playlist-btn')){
       popover.classList.remove('open');
     }
   });
 
-  // Клик по тёмному фону (не по самому окну) закрывает модалку — так удобнее.
   [modalBackdrop, authModalBackdrop, playlistModalBackdrop].forEach(backdrop => {
     backdrop.addEventListener('click', (e) => {
       if (e.target === backdrop) backdrop.classList.remove('open');
     });
   });
 
+  // ---------- Плеер ----------
   function fmt(sec){
     if (!isFinite(sec)) return '0:00';
     const m = Math.floor(sec/60), s = Math.floor(sec%60);
@@ -727,34 +831,46 @@
     currentIndex = i;
     const t = tracks[i];
     audio.src = t.src;
+
+    // Плеер снизу
+    npCover.style.background = coverBg(t.color);
+    npCover.textContent = '';
     npTitle.textContent = t.title;
     npArtist.textContent = t.artist;
-    vinylLabel.style.background = t.color;
-    document.getElementById('card-' + i).classList.add('playing');
-    if (autoplay){
-      audio.play();
-    }
+
+    // Герой «Сейчас играет»
+    heroCover.style.background = coverBg(t.color);
+    heroCover.textContent = '';
+    heroTitle.textContent = t.title;
+    heroArtist.textContent = t.artist;
+
+    const card = document.getElementById('card-' + i);
+    if (card) card.classList.add('playing');
+
+    if (autoplay) audio.play();
   }
 
   function setPlayingState(playing){
     isPlaying = playing;
-    vinyl.classList.toggle('spinning', playing);
+    heroEq.classList.toggle('playing', playing);
     playIcon.innerHTML = playing
       ? '<path d="M6 5h4v14H6zm8 0h4v14h-4z"/>'
       : '<path d="M8 5v14l11-7z"/>';
   }
 
   playBtn.addEventListener('click', () => {
-    if (currentIndex === -1){ loadTrack(0, true); return; }
+    if (currentIndex === -1){ if (tracks.length) loadTrack(0, true); return; }
     if (audio.paused){ audio.play(); } else { audio.pause(); }
   });
 
   document.getElementById('next-btn').addEventListener('click', () => {
+    if (!tracks.length) return;
     const next = currentIndex === -1 ? 0 : (currentIndex + 1) % tracks.length;
     loadTrack(next, true);
   });
 
   document.getElementById('prev-btn').addEventListener('click', () => {
+    if (!tracks.length) return;
     const prev = currentIndex <= 0 ? tracks.length - 1 : currentIndex - 1;
     loadTrack(prev, true);
   });
@@ -762,6 +878,7 @@
   audio.addEventListener('play', () => setPlayingState(true));
   audio.addEventListener('pause', () => setPlayingState(false));
   audio.addEventListener('ended', () => {
+    if (!tracks.length) return;
     const next = (currentIndex + 1) % tracks.length;
     loadTrack(next, true);
   });
@@ -784,9 +901,7 @@
     audio.currentTime = pct * audio.duration;
   });
 
-  volume.addEventListener('input', () => {
-    audio.volume = volume.value / 100;
-  });
+  volume.addEventListener('input', () => { audio.volume = volume.value / 100; });
   audio.volume = 0.7;
 </script>
 
