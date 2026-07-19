@@ -80,7 +80,8 @@
     100%{transform:translate(-3%,4%) scale(1.04);}
   }
 
-  .app{ display:flex; flex:1; min-height:0; position:relative; z-index:1; padding:16px; gap:16px; }
+  /* Нижний отступ резервирует место под плавающий плеер, чтобы он не перекрывал сайдбар (и кнопку «Войти») */
+  .app{ display:flex; flex:1; min-height:0; position:relative; z-index:1; padding:16px 16px 114px; gap:16px; }
 
   /* ---------- SIDEBAR ---------- */
   .sidebar{
@@ -134,7 +135,7 @@
   .auth-logout-btn:hover{ color:var(--text); }
 
   /* ---------- MAIN ---------- */
-  main{ flex:1; overflow-y:auto; padding:8px 26px 150px; min-width:0; }
+  main{ flex:1; overflow-y:auto; padding:8px 26px 24px; min-width:0; }
 
   /* Верхняя строка: приветствие + переключатель темы */
   .topbar{ display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:22px; }
