@@ -224,6 +224,21 @@
   .track-card:hover .add-to-playlist-btn{ opacity:1; }
   .add-to-playlist-btn:hover{ background:var(--accent); }
 
+  .delete-track-btn{
+    position:absolute; top:8px; left:8px; width:26px; height:26px; border-radius:50%;
+    background:rgba(10,12,20,.5); border:none; color:#fff; font-size:13px; line-height:1;
+    cursor:pointer; opacity:0; transition:.15s; display:flex; align-items:center; justify-content:center;
+    backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+  }
+  .track-card:hover .delete-track-btn{ opacity:1; }
+  .delete-track-btn:hover{ background:var(--danger); }
+
+  .track-artist.linkable{ cursor:pointer; }
+  .track-artist.linkable:hover{ color:var(--accent); text-decoration:underline; }
+
+  .auth-username{ cursor:pointer; }
+  .auth-username:hover{ text-decoration:underline; }
+
   .add-to-playlist-popover{
     display:none; position:fixed; z-index:60;
     background:var(--modal-bg); border:1px solid var(--glass-line); border-radius:14px; padding:6px; min-width:190px;
@@ -524,6 +539,7 @@
   // ---------- Данные треков берём с сервера ----------
   let tracks = [];
   let libraryTracks = [];   // полный список библиотеки — нужен для поиска и возврата на главную
+  let currentUser = null;   // кто сейчас вошёл (или null) — нужно, чтобы знать, чьи треки можно удалять
 
   async function loadTracksFromServer(){
     const response = await fetch('/api/tracks');
@@ -563,21 +579,55 @@
       const card = document.createElement('div');
       card.className = 'track-card';
       card.id = 'card-' + i;
+
+      // Кнопку удаления показываем только на треках, которые загрузил я сам.
+      const canDelete = currentUser && t.user_id === currentUser.id;
+      // Имя исполнителя кликабельно только если у трека вообще есть владелец-аккаунт
+      // (у демо-треков owner_username не приходит с сервера — там некуда вести).
+      const artistLinkable = !!t.owner_username;
+
       card.innerHTML = `
         <div class="cover" style="background:${coverBg(t.color)}">
           ${initials(t.title)}
           <button class="add-to-playlist-btn" data-track-id="${t.id}" title="Добавить в плейлист">+</button>
+          ${canDelete ? `<button class="delete-track-btn" data-track-id="${t.id}" title="Удалить трек">✕</button>` : ''}
         </div>
         <div class="track-title">${t.title}</div>
-        <div class="track-artist">${t.artist}</div>
+        <div class="track-artist${artistLinkable ? ' linkable' : ''}">${t.artist}</div>
       `;
       card.addEventListener('click', () => loadTrack(i, true));
       card.querySelector('.add-to-playlist-btn').addEventListener('click', (e) => {
         e.stopPropagation();
         openAddToPlaylistPopover(e.currentTarget, t.id);
       });
+
+      const deleteBtn = card.querySelector('.delete-track-btn');
+      if (deleteBtn){
+        deleteBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          deleteTrack(t.id);
+        });
+      }
+
+      if (artistLinkable){
+        card.querySelector('.track-artist').addEventListener('click', (e) => {
+          e.stopPropagation();
+          openProfileView(t.owner_username);
+        });
+      }
+
       grid.appendChild(card);
     });
+  }
+
+  async function deleteTrack(trackId){
+    if (!confirm('Удалить этот трек? Это действие нельзя отменить.')) return;
+    const response = await fetch(`/api/tracks/${trackId}`, { method: 'DELETE' });
+    if (!response.ok){
+      alert('Не получилось удалить трек.');
+      return;
+    }
+    await loadTracksFromServer();
   }
 
   loadTracksFromServer();
@@ -588,6 +638,12 @@
   const uploadStatus = document.getElementById('upload-status');
 
   document.getElementById('upload-open-btn').addEventListener('click', () => {
+    // Без входа сервер всё равно отклонит загрузку (requireLogin) — но лучше
+    // сразу открыть окно входа, чем дать заполнить форму и получить ошибку в конце.
+    if (!currentUser){
+      openAuthModal();
+      return;
+    }
     modalBackdrop.classList.add('open');
   });
   document.getElementById('modal-cancel-btn').addEventListener('click', () => {
@@ -641,14 +697,16 @@
   let authMode = 'login';
 
   function renderAuthArea(user){
+    currentUser = user;
     if (user){
       authArea.innerHTML = `
         <div class="auth-user-row">
           <span class="auth-ava">${initials(user.username)}</span>
-          <span class="auth-username">${user.username}</span>
+          <span class="auth-username" id="auth-username-link" title="Мой профиль">${user.username}</span>
           <button class="auth-logout-btn" id="logout-btn">Выйти</button>
         </div>
       `;
+      document.getElementById('auth-username-link').addEventListener('click', () => openProfileView(user.username));
       document.getElementById('logout-btn').addEventListener('click', async () => {
         await fetch('/api/logout', { method: 'POST' });
         renderAuthArea(null);
@@ -661,6 +719,8 @@
       document.getElementById('auth-open-btn').addEventListener('click', openAuthModal);
       renderPlaylistList([]);
     }
+    // Кнопки удаления зависят от того, кто вошёл — перерисовываем уже видимые карточки.
+    renderTrackCards();
   }
 
   function openAuthModal(){ authModalBackdrop.classList.add('open'); }
@@ -772,6 +832,21 @@
     backToLibraryLink.style.display = 'none';
     await loadTracksFromServer();
   });
+
+  // ---------- Профиль пользователя (его загруженные треки) ----------
+  async function openProfileView(username){
+    const response = await fetch(`/api/users/${encodeURIComponent(username)}`);
+    if (!response.ok) return;
+    const data = await response.json();
+
+    tracks = data.tracks;
+    renderTrackCards();
+    setActiveNav(null);
+    heroEl.style.display = '';
+    searchInput.style.display = 'none';
+    sectionTitleText.textContent = 'Треки: ' + data.user.username;
+    backToLibraryLink.style.display = 'inline';
+  }
 
   document.getElementById('new-playlist-btn').addEventListener('click', () => {
     playlistModalBackdrop.classList.add('open');

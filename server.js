@@ -40,6 +40,15 @@ db.exec(`
   )
 `);
 
+// Миграция: раньше у tracks не было владельца. Добавляем колонку, если её ещё нет —
+// это выполняется и локально, и на хостинге при каждом старте сервера,
+// поэтому безопасно и для чистой БД, и для уже наполненной данными (Railway Volume).
+const trackColumns = db.prepare('PRAGMA table_info(tracks)').all();
+if (!trackColumns.some(c => c.name === 'user_id')) {
+  db.exec('ALTER TABLE tracks ADD COLUMN user_id INTEGER REFERENCES users(id)');
+  console.log('Миграция: в tracks добавлена колонка user_id.');
+}
+
 // Сам плейлист — просто название и чей он (user_id).
 db.exec(`
   CREATE TABLE IF NOT EXISTS playlists (
@@ -131,15 +140,22 @@ app.use(session({
 // Теперь этот маршрут не берёт данные из списка в коде,
 // а делает настоящий SQL-запрос к базе данных.
 app.get('/api/tracks', (req, res) => {
-  // SELECT * FROM tracks — "выбери все столбцы из таблицы tracks"
-  const tracks = db.prepare('SELECT * FROM tracks').all();
+  // LEFT JOIN — у демо-треков user_id пустой (NULL), но они всё равно должны
+  // попасть в список, поэтому не INNER JOIN, а именно LEFT.
+  const tracks = db.prepare(`
+    SELECT tracks.*, users.username AS owner_username
+    FROM tracks
+    LEFT JOIN users ON users.id = tracks.user_id
+  `).all();
   res.json(tracks);
 });
 
-// Новый маршрут: приём загруженного трека.
+// Новый маршрут: приём загруженного трека. Загружать может только вошедший
+// пользователь (requireLogin определён ниже, но объявления function поднимаются
+// наверх файла, так что ссылаться на него здесь можно).
 // upload.single('audioFile') — говорит multer'у: "жди ОДИН файл, который придёт
 // в форме под именем audioFile", и сохрани его согласно настройкам storage выше.
-app.post('/api/tracks', upload.single('audioFile'), (req, res) => {
+app.post('/api/tracks', requireLogin, upload.single('audioFile'), (req, res) => {
   const { title, artist } = req.body; // текстовые поля формы (не файл)
 
   if (!req.file || !title || !artist) {
@@ -151,12 +167,50 @@ app.post('/api/tracks', upload.single('audioFile'), (req, res) => {
   const color = coverColors[Math.floor(Math.random() * coverColors.length)];
 
   const insert = db.prepare(
-    'INSERT INTO tracks (title, artist, color, src) VALUES (?, ?, ?, ?)'
+    'INSERT INTO tracks (title, artist, color, src, user_id) VALUES (?, ?, ?, ?, ?)'
   );
-  const result = insert.run(title, artist, color, src);
+  const result = insert.run(title, artist, color, src, req.session.userId);
 
   // Отправляем обратно только что созданный трек — фронтенду это пригодится.
-  res.json({ id: result.lastInsertRowid, title, artist, color, src });
+  res.json({ id: result.lastInsertRowid, title, artist, color, src, user_id: req.session.userId });
+});
+
+// --- Удалить свой трек ---
+app.delete('/api/tracks/:id', requireLogin, (req, res) => {
+  const track = db.prepare('SELECT * FROM tracks WHERE id = ?').get(req.params.id);
+  if (!track) return res.status(404).json({ error: 'Трек не найден.' });
+  if (track.user_id !== req.session.userId) {
+    return res.status(403).json({ error: 'Можно удалять только свои треки.' });
+  }
+
+  // Сначала убираем трек из всех плейлистов (иначе останутся "битые" ссылки),
+  // потом сам трек.
+  db.prepare('DELETE FROM playlist_tracks WHERE track_id = ?').run(track.id);
+  db.prepare('DELETE FROM tracks WHERE id = ?').run(track.id);
+
+  // Демо-треки ссылаются на внешний soundhelix.com, а не на файл на диске —
+  // трогаем диск только для реально загруженных файлов.
+  if (track.src && track.src.startsWith('/uploads/')) {
+    const filePath = path.join(uploadsDir, track.src.replace('/uploads/', ''));
+    fs.unlink(filePath, () => {}); // не страшно, если файла уже нет
+  }
+
+  res.json({ ok: true });
+});
+
+// --- Публичный профиль пользователя: сам пользователь + его треки ---
+app.get('/api/users/:username', (req, res) => {
+  const user = db.prepare('SELECT id, username FROM users WHERE username = ?').get(req.params.username);
+  if (!user) return res.status(404).json({ error: 'Пользователь не найден.' });
+
+  const tracks = db.prepare(`
+    SELECT tracks.*, users.username AS owner_username
+    FROM tracks
+    LEFT JOIN users ON users.id = tracks.user_id
+    WHERE tracks.user_id = ?
+  `).all(user.id);
+
+  res.json({ user, tracks });
 });
 
 // --- Регистрация ---
@@ -259,8 +313,9 @@ app.get('/api/playlists/:id', requireLogin, (req, res) => {
   // JOIN — объединяем две таблицы: playlist_tracks (кто в каком плейлисте)
   // и tracks (сама информация о треке), чтобы получить полные данные треков.
   const tracks = db.prepare(`
-    SELECT tracks.* FROM playlist_tracks
+    SELECT tracks.*, users.username AS owner_username FROM playlist_tracks
     JOIN tracks ON tracks.id = playlist_tracks.track_id
+    LEFT JOIN users ON users.id = tracks.user_id
     WHERE playlist_tracks.playlist_id = ?
   `).all(req.params.id);
 
