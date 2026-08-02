@@ -260,6 +260,13 @@
   .track-meta{ font-size:11.5px; color:var(--dim); margin-top:2px; }
   .repost-badge{ font-size:11px; color:var(--accent); margin-bottom:4px; }
 
+  .admin-reports{ display:flex; flex-direction:column; gap:12px; max-width:520px; }
+  .report-item{
+    background:var(--card); border:1px solid var(--glass-line); border-radius:14px;
+    padding:16px; font-size:13.5px;
+  }
+  .report-item .report-reason{ color:var(--dim); font-size:12.5px; margin-top:4px; }
+
   .comments-list{ max-height:280px; overflow-y:auto; margin:14px 0; display:flex; flex-direction:column; gap:11px; }
   .comment-item{ font-size:13px; line-height:1.4; }
   .comment-author{ font-weight:600; color:var(--text); margin-right:6px; }
@@ -399,6 +406,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></svg>
         Лента
       </div>
+      <div class="nav-item" id="nav-admin" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L14.7 3.86a2 2 0 0 0-3.4 0z"/></svg>
+        Жалобы
+      </div>
     </nav>
     <div class="playlists">
       <h3>
@@ -453,6 +464,7 @@
       <button id="playlist-share-btn" class="btn-glass">Поделиться ссылкой</button>
     </div>
     <div class="grid" id="track-grid"></div>
+    <div class="admin-reports" id="admin-reports-view" style="display:none;"></div>
   </main>
 </div>
 
@@ -680,8 +692,14 @@
   const HEART_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-6.7-4.35-9.33-8.2C1 10.28 1.5 6.9 4.36 5.36 6.6 4.16 9 4.9 12 7.5c3-2.6 5.4-3.34 7.64-2.14C22.5 6.9 23 10.28 21.33 12.8 18.7 16.65 12 21 12 21z"/></svg>';
   const COMMENT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
   const REPOST_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>';
+  const FLAG_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22V4a1 1 0 0 1 1-1h13l-2.5 5L20 13H5"/></svg>';
 
   function renderTrackCards(){
+    // Сетка треков и экран админ-жалоб взаимоисключающие — если рисуем
+    // карточки, значит точно не на экране жалоб, и сетку нужно вернуть.
+    grid.style.display = '';
+    hideAdminReports();
+
     grid.innerHTML = '';
     tracks.forEach((t, i) => {
       const card = document.createElement('div');
@@ -737,6 +755,7 @@
           <button class="stat-btn repost-btn${t.reposted_by_me ? ' active' : ''}" title="Репост">
             ${REPOST_ICON}<span class="stat-count">${t.repost_count || 0}</span>
           </button>
+          ${canDelete ? '' : `<button class="stat-btn report-btn" title="Пожаловаться">${FLAG_ICON}</button>`}
         </div>
       `;
 
@@ -781,8 +800,29 @@
         toggleRepost(t);
       });
 
+      const reportBtn = card.querySelector('.report-btn');
+      if (reportBtn){
+        reportBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          reportTrack(t.id);
+        });
+      }
+
       grid.appendChild(card);
     });
+  }
+
+  async function reportTrack(trackId){
+    if (!currentUser){ openAuthModal(); return; }
+    const reason = prompt('Почему жалуетесь на этот трек?');
+    if (!reason || !reason.trim()) return;
+
+    const response = await fetch(`/api/tracks/${trackId}/report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: reason.trim() })
+    });
+    alert(response.ok ? 'Жалоба отправлена.' : 'Не получилось отправить жалобу.');
   }
 
   // Репост обновляется точно так же "оптимистично", как и лайк (см. toggleLike ниже).
@@ -1017,10 +1057,12 @@
       });
       greeting.textContent = 'С возвращением, ' + user.username;
       loadPlaylists();
+      navAdmin.style.display = user.is_admin ? '' : 'none';
     } else {
       authArea.innerHTML = `<button class="btn-glass" id="auth-open-btn" style="width:100%;">Войти</button>`;
       document.getElementById('auth-open-btn').addEventListener('click', openAuthModal);
       renderPlaylistList([]);
+      navAdmin.style.display = 'none';
     }
     // Кнопки удаления зависят от того, кто вошёл — перерисовываем уже видимые карточки.
     renderTrackCards();
@@ -1437,6 +1479,8 @@
   const navSearch = document.getElementById('nav-search');
   const navLibrary = document.getElementById('nav-library');
   const navFeed = document.getElementById('nav-feed');
+  const navAdmin = document.getElementById('nav-admin');
+  const adminReportsView = document.getElementById('admin-reports-view');
   const heroEl = document.querySelector('.hero');
   const searchInput = document.getElementById('search-input');
 
@@ -1512,6 +1556,68 @@
     tracks = response.ok ? await response.json() : [];
     renderTrackCards();
   }
+
+  // ---------- Админ-панель: список открытых жалоб ----------
+  function hideAdminReports(){
+    adminReportsView.style.display = 'none';
+  }
+
+  async function goAdminReports(){
+    if (!currentUser || !currentUser.is_admin) return;
+
+    setActiveNav(navAdmin);
+    sectionTitleText.textContent = 'Жалобы';
+    backToLibraryLink.style.display = 'none';
+    hideProfileHeader();
+    heroEl.style.display = 'none';
+    searchInput.style.display = 'none';
+    grid.style.display = 'none';
+    adminReportsView.style.display = 'flex';
+
+    await loadAdminReports();
+  }
+
+  async function loadAdminReports(){
+    const response = await fetch('/api/admin/reports');
+    if (!response.ok){
+      adminReportsView.innerHTML = '<div class="comment-empty">Не получилось загрузить жалобы.</div>';
+      return;
+    }
+    const reports = await response.json();
+    if (reports.length === 0){
+      adminReportsView.innerHTML = '<div class="comment-empty">Открытых жалоб нет.</div>';
+      return;
+    }
+
+    adminReportsView.innerHTML = reports.map(r => `
+      <div class="report-item" data-report-id="${r.id}">
+        <div><strong>${escapeHtml(r.track_title)}</strong> — ${escapeHtml(r.track_artist)}</div>
+        <div class="report-reason">Пожаловался(-ась): ${escapeHtml(r.reporter_username)} · Причина: ${escapeHtml(r.reason)}</div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary dismiss-report-btn">Отклонить</button>
+          <button type="button" class="btn-primary delete-reported-track-btn" style="background:var(--danger);">Удалить трек</button>
+        </div>
+      </div>
+    `).join('');
+
+    adminReportsView.querySelectorAll('.dismiss-report-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const reportId = e.target.closest('.report-item').dataset.reportId;
+        await fetch(`/api/admin/reports/${reportId}/dismiss`, { method: 'POST' });
+        loadAdminReports();
+      });
+    });
+    adminReportsView.querySelectorAll('.delete-reported-track-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        if (!confirm('Удалить этот трек? Это действие нельзя отменить.')) return;
+        const reportId = e.target.closest('.report-item').dataset.reportId;
+        await fetch(`/api/admin/reports/${reportId}/delete-track`, { method: 'POST' });
+        loadAdminReports();
+      });
+    });
+  }
+
+  navAdmin.addEventListener('click', goAdminReports);
 
   navHome.addEventListener('click', goHome);
   navLibrary.addEventListener('click', goLibrary);

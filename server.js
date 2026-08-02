@@ -40,6 +40,45 @@ db.exec(`
   )
 `);
 
+// Миграция: администратор — тот, кто может смотреть жалобы и удалять чужие треки.
+const userColumns = db.prepare('PRAGMA table_info(users)').all().map(c => c.name);
+if (!userColumns.includes('is_admin')) {
+  db.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0');
+  console.log('Миграция: в users добавлена колонка is_admin.');
+}
+
+// "Бутстрап" администратора: если в базе ещё ни у кого нет прав админа,
+// а пользователи уже есть — назначаем админом самого старого из них (id
+// наименьший = зарегистрировался раньше всех). Вызывается и здесь при
+// старте сервера (для уже существующих пользователей), и сразу после
+// каждой новой регистрации (чтобы самый первый пользователь на чистой базе
+// стал админом сразу, не дожидаясь перезапуска сервера).
+function ensureAdminExists() {
+  const hasAdmin = db.prepare('SELECT COUNT(*) AS c FROM users WHERE is_admin = 1').get().c > 0;
+  if (hasAdmin) return;
+
+  const oldestUser = db.prepare('SELECT id FROM users ORDER BY id ASC LIMIT 1').get();
+  if (oldestUser) {
+    db.prepare('UPDATE users SET is_admin = 1 WHERE id = ?').run(oldestUser.id);
+    console.log(`Бутстрап: пользователь #${oldestUser.id} назначен администратором.`);
+  }
+}
+ensureAdminExists();
+
+// Жалобы на треки.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reporter_id INTEGER NOT NULL,
+    track_id INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (reporter_id) REFERENCES users(id),
+    FOREIGN KEY (track_id) REFERENCES tracks(id)
+  )
+`);
+
 // Миграция: раньше у tracks не было владельца. Добавляем колонку, если её ещё нет —
 // это выполняется и локально, и на хостинге при каждом старте сервера,
 // поэтому безопасно и для чистой БД, и для уже наполненной данными (Railway Volume).
@@ -193,7 +232,22 @@ const storage = multer.diskStorage({
     cb(null, uniqueName);
   }
 });
-const upload = multer({ storage });
+const upload = multer({
+  storage,
+  // 30 МБ с запасом хватает на несколько минут mp3 в приличном битрейте —
+  // без лимита кто угодно мог бы залить файл на несколько гигабайт и
+  // забить весь диск сервера.
+  limits: { fileSize: 30 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.fieldname === 'audioFile' && !file.mimetype.startsWith('audio/')) {
+      return cb(new Error('Аудиофайл должен быть в аудиоформате.'));
+    }
+    if (file.fieldname === 'cover' && !file.mimetype.startsWith('image/')) {
+      return cb(new Error('Обложка должна быть картинкой.'));
+    }
+    cb(null, true);
+  }
+});
 
 // Загрузка трека теперь принимает не один файл, а два поля: сам аудиофайл
 // и (не обязательно) картинку обложки. upload.fields умеет сразу оба.
@@ -355,20 +409,16 @@ app.get('/api/search', (req, res) => {
   res.json({ tracks });
 });
 
-// --- Удалить свой трек ---
-app.delete('/api/tracks/:id', requireLogin, (req, res) => {
-  const track = db.prepare('SELECT * FROM tracks WHERE id = ?').get(req.params.id);
-  if (!track) return res.status(404).json({ error: 'Трек не найден.' });
-  if (track.user_id !== req.session.userId) {
-    return res.status(403).json({ error: 'Можно удалять только свои треки.' });
-  }
-
-  // Сначала убираем все следы трека в других таблицах (иначе там останутся
-  // "битые" строки, ссылающиеся на уже удалённый id), потом сам трек.
+// Удаляет трек и всё, что на него ссылается (плейлисты, лайки, комментарии,
+// репосты, жалобы), плюс файлы с диска. Используется и когда трек удаляет
+// сам владелец, и когда его удаляет администратор по жалобе — оба места
+// делают ровно одно и то же, поэтому это отдельная функция, а не копипаста.
+function deleteTrackRecord(track) {
   db.prepare('DELETE FROM playlist_tracks WHERE track_id = ?').run(track.id);
   db.prepare('DELETE FROM likes WHERE track_id = ?').run(track.id);
   db.prepare('DELETE FROM comments WHERE track_id = ?').run(track.id);
   db.prepare('DELETE FROM reposts WHERE track_id = ?').run(track.id);
+  db.prepare('DELETE FROM reports WHERE track_id = ?').run(track.id);
   db.prepare('DELETE FROM tracks WHERE id = ?').run(track.id);
 
   // Демо-треки ссылаются на внешний soundhelix.com, а не на файл на диске —
@@ -380,6 +430,60 @@ app.delete('/api/tracks/:id', requireLogin, (req, res) => {
       fs.unlink(filePath, () => {}); // не страшно, если файла уже нет
     }
   }
+}
+
+// --- Удалить свой трек ---
+app.delete('/api/tracks/:id', requireLogin, (req, res) => {
+  const track = db.prepare('SELECT * FROM tracks WHERE id = ?').get(req.params.id);
+  if (!track) return res.status(404).json({ error: 'Трек не найден.' });
+  if (track.user_id !== req.session.userId) {
+    return res.status(403).json({ error: 'Можно удалять только свои треки.' });
+  }
+  deleteTrackRecord(track);
+  res.json({ ok: true });
+});
+
+// --- Пожаловаться на трек ---
+app.post('/api/tracks/:id/report', requireLogin, (req, res) => {
+  const { reason } = req.body;
+  if (!reason || !reason.trim()) {
+    return res.status(400).json({ error: 'Укажи причину жалобы.' });
+  }
+  const track = db.prepare('SELECT id FROM tracks WHERE id = ?').get(req.params.id);
+  if (!track) return res.status(404).json({ error: 'Трек не найден.' });
+
+  db.prepare('INSERT INTO reports (reporter_id, track_id, reason) VALUES (?, ?, ?)')
+    .run(req.session.userId, req.params.id, reason.trim());
+  res.json({ ok: true });
+});
+
+// --- Список открытых жалоб (только для админа) ---
+app.get('/api/admin/reports', requireAdmin, (req, res) => {
+  const reports = db.prepare(`
+    SELECT reports.*, tracks.title AS track_title, tracks.artist AS track_artist,
+      reporters.username AS reporter_username
+    FROM reports
+    JOIN tracks ON tracks.id = reports.track_id
+    JOIN users reporters ON reporters.id = reports.reporter_id
+    WHERE reports.status = 'open'
+    ORDER BY reports.id DESC
+  `).all();
+  res.json(reports);
+});
+
+// --- Отклонить жалобу (трек остаётся) ---
+app.post('/api/admin/reports/:id/dismiss', requireAdmin, (req, res) => {
+  db.prepare("UPDATE reports SET status = 'resolved' WHERE id = ?").run(req.params.id);
+  res.json({ ok: true });
+});
+
+// --- Удалить трек по жалобе ---
+app.post('/api/admin/reports/:id/delete-track', requireAdmin, (req, res) => {
+  const report = db.prepare('SELECT * FROM reports WHERE id = ?').get(req.params.id);
+  if (!report) return res.status(404).json({ error: 'Жалоба не найдена.' });
+
+  const track = db.prepare('SELECT * FROM tracks WHERE id = ?').get(report.track_id);
+  if (track) deleteTrackRecord(track); // это заодно закроет и все жалобы на этот трек
 
   res.json({ ok: true });
 });
@@ -592,6 +696,7 @@ app.post('/api/register', async (req, res) => {
   try {
     const insert = db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)');
     const result = insert.run(username, passwordHash);
+    ensureAdminExists(); // если это первый пользователь в базе — он станет админом
 
     // Сразу логиним только что зарегистрированного пользователя,
     // сохраняя его id в сессию.
@@ -635,7 +740,7 @@ app.get('/api/me', (req, res) => {
   if (!req.session.userId) {
     return res.json({ user: null });
   }
-  const user = db.prepare('SELECT id, username FROM users WHERE id = ?').get(req.session.userId);
+  const user = db.prepare('SELECT id, username, is_admin FROM users WHERE id = ?').get(req.session.userId);
   res.json({ user: user || null });
 });
 
@@ -645,6 +750,18 @@ app.get('/api/me', (req, res) => {
 function requireLogin(req, res, next) {
   if (!req.session.userId) {
     return res.status(401).json({ error: 'Нужно войти в аккаунт.' });
+  }
+  next();
+}
+
+// --- Middleware: то же самое, но ещё и проверяет права администратора ---
+function requireAdmin(req, res, next) {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: 'Нужно войти в аккаунт.' });
+  }
+  const user = db.prepare('SELECT is_admin FROM users WHERE id = ?').get(req.session.userId);
+  if (!user || !user.is_admin) {
+    return res.status(403).json({ error: 'Только для администратора.' });
   }
   next();
 }
@@ -722,6 +839,21 @@ app.post('/api/playlists/:id/tracks', requireLogin, (req, res) => {
   db.prepare('INSERT INTO playlist_tracks (playlist_id, track_id) VALUES (?, ?)')
     .run(req.params.id, trackId);
   res.json({ ok: true });
+});
+
+// Обработчик ошибок загрузки файлов (multer): без него превышенный лимит
+// размера или неправильный тип файла улетели бы в стандартную страницу
+// ошибки Express (HTML), а не понятный JSON, который ждёт фронтенд.
+// Middleware с 4 параметрами (err первым) Express распознаёт как обработчик
+// ошибок автоматически — это не обычный маршрут.
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError || err) {
+    const message = err.code === 'LIMIT_FILE_SIZE'
+      ? 'Файл слишком большой (максимум 30 МБ).'
+      : err.message || 'Не удалось загрузить файл.';
+    return res.status(400).json({ error: message });
+  }
+  next(err);
 });
 
 // Запускаем сервер — он начинает "слушать" запросы на порту 3000.
