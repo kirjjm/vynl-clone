@@ -60,7 +60,8 @@ const newTrackColumns = [
   ['cover_path', 'TEXT'],
   ['duration', 'INTEGER'],
   ['play_count', 'INTEGER DEFAULT 0'],
-  ['created_at', 'TEXT']
+  ['created_at', 'TEXT'],
+  ['is_private', 'INTEGER DEFAULT 0']
 ];
 for (const [name, type] of newTrackColumns) {
   if (!trackColumnsV2.includes(name)) {
@@ -109,6 +110,21 @@ db.exec(`
   )
 `);
 
+// Репосты: user_id поделился чужим (или своим) треком у себя — трек попадает
+// в ленту его подписчиков с пометкой "репостнул X". UNIQUE — нельзя
+// репостнуть один и тот же трек дважды.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS reposts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    track_id INTEGER NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, track_id),
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (track_id) REFERENCES tracks(id)
+  )
+`);
+
 // Сам плейлист — просто название и чей он (user_id).
 db.exec(`
   CREATE TABLE IF NOT EXISTS playlists (
@@ -118,6 +134,13 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id)
   )
 `);
+
+// Миграция: плейлист можно сделать публичным (доступным по ссылке без входа).
+const playlistColumns = db.prepare('PRAGMA table_info(playlists)').all().map(c => c.name);
+if (!playlistColumns.includes('is_public')) {
+  db.exec('ALTER TABLE playlists ADD COLUMN is_public INTEGER DEFAULT 0');
+  console.log('Миграция: в playlists добавлена колонка is_public.');
+}
 
 // Таблица-связка: какой трек лежит в каком плейлисте.
 // Один трек может быть сразу в нескольких разных плейлистах — поэтому
@@ -217,14 +240,19 @@ app.get('/api/tracks', (req, res) => {
   // like_count/comment_count — подзапросы, которые на лету считают,
   // сколько у трека лайков и комментариев. liked_by_me — лайкнул ли трек
   // именно тот, кто сейчас смотрит список.
+  // Приватные треки — только на странице своего профиля у владельца,
+  // в общей библиотеке (этот маршрут) их не показываем никому.
   const tracks = db.prepare(`
     SELECT tracks.*, users.username AS owner_username,
       (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id) AS like_count,
       (SELECT COUNT(*) FROM comments WHERE comments.track_id = tracks.id) AS comment_count,
-      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id AND likes.user_id = ?) AS liked_by_me
+      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id AND likes.user_id = ?) AS liked_by_me,
+      (SELECT COUNT(*) FROM reposts WHERE reposts.track_id = tracks.id) AS repost_count,
+      (SELECT COUNT(*) FROM reposts WHERE reposts.track_id = tracks.id AND reposts.user_id = ?) AS reposted_by_me
     FROM tracks
     LEFT JOIN users ON users.id = tracks.user_id
-  `).all(viewerId);
+    WHERE tracks.is_private IS NULL OR tracks.is_private = 0
+  `).all(viewerId, viewerId);
   res.json(tracks);
 });
 
@@ -234,7 +262,7 @@ app.get('/api/tracks', (req, res) => {
 // upload.single('audioFile') — говорит multer'у: "жди ОДИН файл, который придёт
 // в форме под именем audioFile", и сохрани его согласно настройкам storage выше.
 app.post('/api/tracks', requireLogin, uploadTrackFiles, async (req, res) => {
-  const { title, artist, genre, description } = req.body; // текстовые поля формы (не файлы)
+  const { title, artist, genre, description, isPrivate } = req.body; // текстовые поля формы (не файлы)
   const audioFile = req.files && req.files.audioFile && req.files.audioFile[0];
   const coverFile = req.files && req.files.cover && req.files.cover[0];
 
@@ -261,12 +289,13 @@ app.post('/api/tracks', requireLogin, uploadTrackFiles, async (req, res) => {
   }
 
   const insert = db.prepare(`
-    INSERT INTO tracks (title, artist, color, src, user_id, genre, description, cover_path, duration, play_count, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'))
+    INSERT INTO tracks (title, artist, color, src, user_id, genre, description, cover_path, duration, play_count, created_at, is_private)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'), ?)
   `);
   const result = insert.run(
     title, artist, color, src, req.session.userId,
-    genre || null, description || null, coverPath, duration
+    genre || null, description || null, coverPath, duration,
+    isPrivate === 'true' || isPrivate === '1' ? 1 : 0
   );
 
   // Отправляем обратно только что созданный трек — фронтенду это пригодится.
@@ -276,6 +305,28 @@ app.post('/api/tracks', requireLogin, uploadTrackFiles, async (req, res) => {
 // --- Отметить прослушивание (для счётчика play_count) ---
 app.post('/api/tracks/:id/play', (req, res) => {
   db.prepare('UPDATE tracks SET play_count = play_count + 1 WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// --- Репост: поделиться чужим (или своим) треком у себя ---
+app.post('/api/tracks/:id/repost', requireLogin, (req, res) => {
+  const track = db.prepare('SELECT id, user_id, is_private FROM tracks WHERE id = ?').get(req.params.id);
+  if (!track) return res.status(404).json({ error: 'Трек не найден.' });
+  // Приватный чужой трек нельзя репостнуть, даже зная его id напрямую —
+  // иначе приватность можно было бы обойти, просто угадав номер трека.
+  if (track.is_private && track.user_id !== req.session.userId) {
+    return res.status(403).json({ error: 'Этот трек приватный.' });
+  }
+
+  db.prepare('INSERT OR IGNORE INTO reposts (user_id, track_id) VALUES (?, ?)')
+    .run(req.session.userId, req.params.id);
+  res.json({ ok: true });
+});
+
+// --- Отменить репост ---
+app.delete('/api/tracks/:id/repost', requireLogin, (req, res) => {
+  db.prepare('DELETE FROM reposts WHERE user_id = ? AND track_id = ?')
+    .run(req.session.userId, req.params.id);
   res.json({ ok: true });
 });
 
@@ -290,13 +341,16 @@ app.get('/api/search', (req, res) => {
     SELECT tracks.*, users.username AS owner_username,
       (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id) AS like_count,
       (SELECT COUNT(*) FROM comments WHERE comments.track_id = tracks.id) AS comment_count,
-      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id AND likes.user_id = ?) AS liked_by_me
+      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id AND likes.user_id = ?) AS liked_by_me,
+      (SELECT COUNT(*) FROM reposts WHERE reposts.track_id = tracks.id) AS repost_count,
+      (SELECT COUNT(*) FROM reposts WHERE reposts.track_id = tracks.id AND reposts.user_id = ?) AS reposted_by_me
     FROM tracks
     LEFT JOIN users ON users.id = tracks.user_id
-    WHERE tracks.title LIKE ? OR tracks.artist LIKE ? OR tracks.genre LIKE ?
+    WHERE (tracks.is_private IS NULL OR tracks.is_private = 0)
+      AND (tracks.title LIKE ? OR tracks.artist LIKE ? OR tracks.genre LIKE ?)
     ORDER BY tracks.id DESC
     LIMIT 60
-  `).all(viewerId, like, like, like);
+  `).all(viewerId, viewerId, like, like, like);
 
   res.json({ tracks });
 });
@@ -314,13 +368,17 @@ app.delete('/api/tracks/:id', requireLogin, (req, res) => {
   db.prepare('DELETE FROM playlist_tracks WHERE track_id = ?').run(track.id);
   db.prepare('DELETE FROM likes WHERE track_id = ?').run(track.id);
   db.prepare('DELETE FROM comments WHERE track_id = ?').run(track.id);
+  db.prepare('DELETE FROM reposts WHERE track_id = ?').run(track.id);
   db.prepare('DELETE FROM tracks WHERE id = ?').run(track.id);
 
   // Демо-треки ссылаются на внешний soundhelix.com, а не на файл на диске —
-  // трогаем диск только для реально загруженных файлов.
-  if (track.src && track.src.startsWith('/uploads/')) {
-    const filePath = path.join(uploadsDir, track.src.replace('/uploads/', ''));
-    fs.unlink(filePath, () => {}); // не страшно, если файла уже нет
+  // трогаем диск только для реально загруженных файлов (это касается и
+  // аудиофайла, и обложки, если она была).
+  for (const filePart of [track.src, track.cover_path]) {
+    if (filePart && filePart.startsWith('/uploads/')) {
+      const filePath = path.join(uploadsDir, filePart.replace('/uploads/', ''));
+      fs.unlink(filePath, () => {}); // не страшно, если файла уже нет
+    }
   }
 
   res.json({ ok: true });
@@ -332,15 +390,20 @@ app.get('/api/users/:username', (req, res) => {
   if (!user) return res.status(404).json({ error: 'Пользователь не найден.' });
 
   const viewerId = req.session.userId || 0;
+  // Свои приватные треки видит только сам владелец профиля — все остальные
+  // (включая гостей) видят только публичные.
+  const isOwnProfile = viewerId === user.id;
   const tracks = db.prepare(`
     SELECT tracks.*, users.username AS owner_username,
       (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id) AS like_count,
       (SELECT COUNT(*) FROM comments WHERE comments.track_id = tracks.id) AS comment_count,
-      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id AND likes.user_id = ?) AS liked_by_me
+      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id AND likes.user_id = ?) AS liked_by_me,
+      (SELECT COUNT(*) FROM reposts WHERE reposts.track_id = tracks.id) AS repost_count,
+      (SELECT COUNT(*) FROM reposts WHERE reposts.track_id = tracks.id AND reposts.user_id = ?) AS reposted_by_me
     FROM tracks
     LEFT JOIN users ON users.id = tracks.user_id
-    WHERE tracks.user_id = ?
-  `).all(viewerId, user.id);
+    WHERE tracks.user_id = ? ${isOwnProfile ? '' : 'AND (tracks.is_private IS NULL OR tracks.is_private = 0)'}
+  `).all(viewerId, viewerId, user.id);
 
   const followersCount = db.prepare('SELECT COUNT(*) AS c FROM follows WHERE followee_id = ?').get(user.id).c;
   const followingCount = db.prepare('SELECT COUNT(*) AS c FROM follows WHERE follower_id = ?').get(user.id).c;
@@ -470,18 +533,44 @@ app.post('/api/tracks/:id/comments', requireLogin, (req, res) => {
 });
 
 // --- Лента: треки тех, на кого я подписан ---
+// Лента — это объединение (UNION) двух источников: треки, которые сами
+// загрузили те, на кого я подписан, И треки, которые они репостнули (даже
+// если оригинального автора я не читаю). У обеих половин ОДИНАКОВЫЙ набор
+// колонок (это требование SQL для UNION) — reposted_by у обычных загрузок
+// всегда NULL, activity_at — единая колонка для сортировки по свежести
+// (дата загрузки трека либо дата репоста, смотря что это за строка).
 app.get('/api/feed', requireLogin, (req, res) => {
+  const userId = req.session.userId;
   const tracks = db.prepare(`
-    SELECT tracks.*, users.username AS owner_username,
+    SELECT tracks.*, u1.username AS owner_username,
       (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id) AS like_count,
       (SELECT COUNT(*) FROM comments WHERE comments.track_id = tracks.id) AS comment_count,
-      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id AND likes.user_id = ?) AS liked_by_me
+      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id AND likes.user_id = ?) AS liked_by_me,
+      NULL AS reposted_by,
+      tracks.created_at AS activity_at
     FROM tracks
     JOIN follows ON follows.followee_id = tracks.user_id
-    JOIN users ON users.id = tracks.user_id
-    WHERE follows.follower_id = ?
-    ORDER BY tracks.id DESC
-  `).all(req.session.userId, req.session.userId);
+    JOIN users u1 ON u1.id = tracks.user_id
+    WHERE follows.follower_id = ? AND (tracks.is_private IS NULL OR tracks.is_private = 0)
+
+    UNION ALL
+
+    SELECT tracks.*, u1.username AS owner_username,
+      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id) AS like_count,
+      (SELECT COUNT(*) FROM comments WHERE comments.track_id = tracks.id) AS comment_count,
+      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id AND likes.user_id = ?) AS liked_by_me,
+      u2.username AS reposted_by,
+      reposts.created_at AS activity_at
+    FROM reposts
+    JOIN tracks ON tracks.id = reposts.track_id
+    JOIN users u1 ON u1.id = tracks.user_id
+    JOIN follows ON follows.followee_id = reposts.user_id
+    JOIN users u2 ON u2.id = reposts.user_id
+    WHERE follows.follower_id = ? AND (tracks.is_private IS NULL OR tracks.is_private = 0)
+
+    ORDER BY activity_at DESC
+    LIMIT 100
+  `).all(userId, userId, userId, userId);
   res.json(tracks);
 });
 
@@ -568,12 +657,12 @@ app.get('/api/playlists', requireLogin, (req, res) => {
 
 // --- Создать новый плейлист ---
 app.post('/api/playlists', requireLogin, (req, res) => {
-  const { name } = req.body;
+  const { name, isPublic } = req.body;
   if (!name) return res.status(400).json({ error: 'Укажи название плейлиста.' });
 
-  const insert = db.prepare('INSERT INTO playlists (user_id, name) VALUES (?, ?)');
-  const result = insert.run(req.session.userId, name);
-  res.json({ id: result.lastInsertRowid, user_id: req.session.userId, name });
+  const insert = db.prepare('INSERT INTO playlists (user_id, name, is_public) VALUES (?, ?, ?)');
+  const result = insert.run(req.session.userId, name, isPublic ? 1 : 0);
+  res.json({ id: result.lastInsertRowid, user_id: req.session.userId, name, is_public: isPublic ? 1 : 0 });
 });
 
 // --- Получить один плейлист вместе со всеми его треками ---
@@ -588,12 +677,37 @@ app.get('/api/playlists/:id', requireLogin, (req, res) => {
     SELECT tracks.*, users.username AS owner_username,
       (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id) AS like_count,
       (SELECT COUNT(*) FROM comments WHERE comments.track_id = tracks.id) AS comment_count,
-      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id AND likes.user_id = ?) AS liked_by_me
+      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id AND likes.user_id = ?) AS liked_by_me,
+      (SELECT COUNT(*) FROM reposts WHERE reposts.track_id = tracks.id) AS repost_count,
+      (SELECT COUNT(*) FROM reposts WHERE reposts.track_id = tracks.id AND reposts.user_id = ?) AS reposted_by_me
     FROM playlist_tracks
     JOIN tracks ON tracks.id = playlist_tracks.track_id
     LEFT JOIN users ON users.id = tracks.user_id
     WHERE playlist_tracks.playlist_id = ?
-  `).all(req.session.userId, req.params.id);
+  `).all(req.session.userId, req.session.userId, req.params.id);
+
+  res.json({ ...playlist, tracks });
+});
+
+// --- Публичный плейлист по ссылке — доступен всем, без входа ---
+app.get('/api/playlists/:id/public', (req, res) => {
+  const playlist = db.prepare('SELECT playlists.*, users.username AS owner_username FROM playlists JOIN users ON users.id = playlists.user_id WHERE playlists.id = ? AND playlists.is_public = 1')
+    .get(req.params.id);
+  if (!playlist) return res.status(404).json({ error: 'Плейлист не найден или не является публичным.' });
+
+  const viewerId = req.session.userId || 0;
+  const tracks = db.prepare(`
+    SELECT tracks.*, users.username AS owner_username,
+      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id) AS like_count,
+      (SELECT COUNT(*) FROM comments WHERE comments.track_id = tracks.id) AS comment_count,
+      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id AND likes.user_id = ?) AS liked_by_me,
+      (SELECT COUNT(*) FROM reposts WHERE reposts.track_id = tracks.id) AS repost_count,
+      (SELECT COUNT(*) FROM reposts WHERE reposts.track_id = tracks.id AND reposts.user_id = ?) AS reposted_by_me
+    FROM playlist_tracks
+    JOIN tracks ON tracks.id = playlist_tracks.track_id
+    LEFT JOIN users ON users.id = tracks.user_id
+    WHERE playlist_tracks.playlist_id = ? AND (tracks.is_private IS NULL OR tracks.is_private = 0)
+  `).all(viewerId, viewerId, req.params.id);
 
   res.json({ ...playlist, tracks });
 });

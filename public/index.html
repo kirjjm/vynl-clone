@@ -246,7 +246,7 @@
   }
   .stat-btn:hover{ color:var(--text); }
   .stat-btn svg{ width:14px; height:14px; flex-shrink:0; }
-  .stat-btn.like-btn.active{ color:var(--accent); }
+  .stat-btn.active{ color:var(--accent); }
 
   .profile-header{ display:flex; align-items:center; gap:14px; margin:-10px 0 16px; font-size:13px; color:var(--dim); }
 
@@ -258,6 +258,7 @@
   .similar-artists .chip:hover{ color:var(--accent); border-color:var(--accent); }
 
   .track-meta{ font-size:11.5px; color:var(--dim); margin-top:2px; }
+  .repost-badge{ font-size:11px; color:var(--accent); margin-bottom:4px; }
 
   .comments-list{ max-height:280px; overflow-y:auto; margin:14px 0; display:flex; flex-direction:column; gap:11px; }
   .comment-item{ font-size:13px; line-height:1.4; }
@@ -341,6 +342,11 @@
   }
   select.form-input{ appearance:none; cursor:pointer; }
   textarea.form-input{ resize:vertical; min-height:60px; font-family:inherit; }
+  .checkbox-row{
+    display:flex; align-items:center; gap:8px; margin:14px 0 0; font-size:12.5px;
+    color:var(--dim); cursor:pointer; user-select:none;
+  }
+  .checkbox-row input{ cursor:pointer; }
   .modal h3{ font-size:20px; font-weight:700; margin-bottom:18px; }
   .form-label{ display:block; font-size:12.5px; color:var(--dim); margin:14px 0 6px; font-weight:600; }
   .form-label:first-of-type{ margin-top:0; }
@@ -442,6 +448,10 @@
       <button id="profile-follow-btn" class="btn-glass" style="display:none;"></button>
     </div>
     <div class="similar-artists" id="similar-artists" style="display:none;"></div>
+    <div class="profile-header" id="playlist-header" style="display:none;">
+      <span>Публичный плейлист</span>
+      <button id="playlist-share-btn" class="btn-glass">Поделиться ссылкой</button>
+    </div>
     <div class="grid" id="track-grid"></div>
   </main>
 </div>
@@ -496,6 +506,11 @@
       <label class="form-label">Описание (необязательно)</label>
       <textarea id="input-description" class="form-input" maxlength="500"></textarea>
 
+      <label class="checkbox-row">
+        <input type="checkbox" id="input-private">
+        Приватный трек (виден только мне)
+      </label>
+
       <div class="modal-actions">
         <button type="button" id="modal-cancel-btn" class="btn-secondary">Отмена</button>
         <button type="submit" class="btn-primary">Загрузить</button>
@@ -532,6 +547,12 @@
     <form id="playlist-form">
       <label class="form-label">Название</label>
       <input type="text" id="playlist-name-input" class="form-input" required>
+
+      <label class="checkbox-row">
+        <input type="checkbox" id="playlist-public-input">
+        Публичный плейлист (доступен по ссылке всем)
+      </label>
+
       <div class="modal-actions">
         <button type="button" id="playlist-cancel-btn" class="btn-secondary">Отмена</button>
         <button type="submit" class="btn-primary">Создать</button>
@@ -658,6 +679,7 @@
 
   const HEART_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-6.7-4.35-9.33-8.2C1 10.28 1.5 6.9 4.36 5.36 6.6 4.16 9 4.9 12 7.5c3-2.6 5.4-3.34 7.64-2.14C22.5 6.9 23 10.28 21.33 12.8 18.7 16.65 12 21 12 21z"/></svg>';
   const COMMENT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
+  const REPOST_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>';
 
   function renderTrackCards(){
     grid.innerHTML = '';
@@ -687,8 +709,16 @@
       if (t.genre) metaParts.push(escapeHtml(t.genre));
       if (t.duration) metaParts.push(fmt(t.duration));
       metaParts.push((t.play_count || 0) + ' ▶');
+      if (t.is_private) metaParts.push('🔒 приватный');
+
+      // reposted_by приходит только у карточек из ленты (там это репост от
+      // кого-то, на кого я подписан) — в остальных списках его просто нет.
+      const repostBadge = t.reposted_by
+        ? `<div class="repost-badge">${REPOST_ICON} Репостнул(а) ${escapeHtml(t.reposted_by)}</div>`
+        : '';
 
       card.innerHTML = `
+        ${repostBadge}
         <div class="cover" style="${coverStyle}">
           ${coverLabel}
           <button class="add-to-playlist-btn" data-track-id="${t.id}" title="Добавить в плейлист">+</button>
@@ -703,6 +733,9 @@
           </button>
           <button class="stat-btn comment-btn" title="Комментарии">
             ${COMMENT_ICON}<span class="stat-count">${t.comment_count || 0}</span>
+          </button>
+          <button class="stat-btn repost-btn${t.reposted_by_me ? ' active' : ''}" title="Репост">
+            ${REPOST_ICON}<span class="stat-count">${t.repost_count || 0}</span>
           </button>
         </div>
       `;
@@ -743,9 +776,33 @@
         e.stopPropagation();
         openCommentsModal(t);
       });
+      card.querySelector('.repost-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleRepost(t);
+      });
 
       grid.appendChild(card);
     });
+  }
+
+  // Репост обновляется точно так же "оптимистично", как и лайк (см. toggleLike ниже).
+  async function toggleRepost(t){
+    if (!currentUser){ openAuthModal(); return; }
+
+    const method = t.reposted_by_me ? 'DELETE' : 'POST';
+    const response = await fetch(`/api/tracks/${t.id}/repost`, { method });
+    if (!response.ok) return;
+
+    t.reposted_by_me = !t.reposted_by_me;
+    t.repost_count = (t.repost_count || 0) + (t.reposted_by_me ? 1 : -1);
+
+    const libT = libraryTracks.find(x => x.id === t.id);
+    if (libT && libT !== t){
+      libT.reposted_by_me = t.reposted_by_me;
+      libT.repost_count = t.repost_count;
+    }
+
+    renderTrackCards();
   }
 
   // Лайк/дизлайк обновляем "оптимистично" — сразу в объекте трека и на экране,
@@ -860,7 +917,16 @@
     await loadComments(activeCommentsTrack.id);
   });
 
-  loadTracksFromServer();
+  // Библиотеку грузим всегда (пригодится для "Главная"/поиска), а если в адресе
+  // страницы есть ?playlist=ID — значит, кто-то перешёл по ссылке "Поделиться"
+  // на публичный плейлист, и сразу после библиотеки показываем его поверх.
+  // await здесь важен: иначе оба запроса пришли бы вперемешку, и библиотека,
+  // отрисовавшись позже, могла бы затереть уже показанный плейлист.
+  (async () => {
+    await loadTracksFromServer();
+    const sharedPlaylistId = new URLSearchParams(location.search).get('playlist');
+    if (sharedPlaylistId) await openSharedPlaylist(sharedPlaylistId);
+  })();
 
   // ---------- Загрузка своего трека ----------
   const modalBackdrop = document.getElementById('modal-backdrop');
@@ -897,6 +963,7 @@
     if (cover) formData.append('cover', cover);
     if (genre) formData.append('genre', genre);
     if (description) formData.append('description', description);
+    if (document.getElementById('input-private').checked) formData.append('isPrivate', 'true');
 
     uploadStatus.textContent = 'Загружаем...';
     uploadStatus.className = 'upload-status';
@@ -1052,6 +1119,11 @@
   const sectionTitleText = document.getElementById('section-title-text');
   const backToLibraryLink = document.getElementById('back-to-library-link');
 
+  const playlistHeader = document.getElementById('playlist-header');
+  const playlistShareBtn = document.getElementById('playlist-share-btn');
+
+  function hidePlaylistHeader(){ playlistHeader.style.display = 'none'; }
+
   async function openPlaylistView(playlistId, name){
     const response = await fetch(`/api/playlists/${playlistId}`);
     if (!response.ok) return;
@@ -1062,12 +1134,52 @@
     hideProfileHeader();
     sectionTitleText.textContent = name;
     backToLibraryLink.style.display = 'inline';
+
+    // "Поделиться" показываем только для публичных плейлистов — по этой
+    // ссылке сможет зайти кто угодно, даже без входа (см. openSharedPlaylist).
+    if (data.is_public){
+      playlistShareBtn.onclick = () => sharePlaylistLink(playlistId);
+      playlistHeader.style.display = 'flex';
+    } else {
+      hidePlaylistHeader();
+    }
+  }
+
+  function sharePlaylistLink(playlistId){
+    const url = `${location.origin}/?playlist=${playlistId}`;
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(url).then(
+        () => { playlistShareBtn.textContent = 'Ссылка скопирована!'; setTimeout(() => playlistShareBtn.textContent = 'Поделиться ссылкой', 1500); },
+        () => prompt('Скопируй ссылку:', url)
+      );
+    } else {
+      prompt('Скопируй ссылку:', url);
+    }
+  }
+
+  // Открыть публичный плейлист по ссылке ?playlist=ID — работает для всех,
+  // даже без входа (это отдельный маршрут /public на сервере).
+  async function openSharedPlaylist(playlistId){
+    const response = await fetch(`/api/playlists/${playlistId}/public`);
+    if (!response.ok) return;
+    const data = await response.json();
+
+    tracks = data.tracks;
+    renderTrackCards();
+    hideProfileHeader();
+    setActiveNav(null);
+    heroEl.style.display = '';
+    searchInput.style.display = 'none';
+    sectionTitleText.textContent = data.name + ' — ' + data.owner_username;
+    backToLibraryLink.style.display = 'inline';
+    hidePlaylistHeader();
   }
 
   backToLibraryLink.addEventListener('click', async () => {
     sectionTitleText.textContent = 'Библиотека';
     backToLibraryLink.style.display = 'none';
     hideProfileHeader();
+    hidePlaylistHeader();
     await loadTracksFromServer();
   });
 
@@ -1082,6 +1194,7 @@
   function hideProfileHeader(){
     profileHeader.style.display = 'none';
     similarArtistsEl.style.display = 'none';
+    hidePlaylistHeader();
     profileState = null;
   }
 
@@ -1161,11 +1274,12 @@
   playlistForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const name = document.getElementById('playlist-name-input').value;
+    const isPublic = document.getElementById('playlist-public-input').checked;
 
     const response = await fetch('/api/playlists', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name })
+      body: JSON.stringify({ name, isPublic })
     });
 
     if (!response.ok){
