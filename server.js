@@ -49,6 +49,26 @@ if (!trackColumns.some(c => c.name === 'user_id')) {
   console.log('Миграция: в tracks добавлена колонка user_id.');
 }
 
+// Миграция (Уровень 2): метаданные трека — жанр, описание, обложка,
+// длительность, счётчик прослушиваний, дата создания. Тот же приём:
+// проверяем список колонок и добавляем недостающие, безопасно для
+// уже наполненной базы на Railway.
+const trackColumnsV2 = db.prepare('PRAGMA table_info(tracks)').all().map(c => c.name);
+const newTrackColumns = [
+  ['genre', 'TEXT'],
+  ['description', 'TEXT'],
+  ['cover_path', 'TEXT'],
+  ['duration', 'INTEGER'],
+  ['play_count', 'INTEGER DEFAULT 0'],
+  ['created_at', 'TEXT']
+];
+for (const [name, type] of newTrackColumns) {
+  if (!trackColumnsV2.includes(name)) {
+    db.exec(`ALTER TABLE tracks ADD COLUMN ${name} ${type}`);
+    console.log(`Миграция: в tracks добавлена колонка ${name}.`);
+  }
+}
+
 // Лайки: кто каким трекам поставил лайк. UNIQUE(user_id, track_id) не даёт
 // одному пользователю лайкнуть один и тот же трек дважды.
 db.exec(`
@@ -152,6 +172,13 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
+// Загрузка трека теперь принимает не один файл, а два поля: сам аудиофайл
+// и (не обязательно) картинку обложки. upload.fields умеет сразу оба.
+const uploadTrackFiles = upload.fields([
+  { name: 'audioFile', maxCount: 1 },
+  { name: 'cover', maxCount: 1 }
+]);
+
 // Небольшой набор цветов для обложек новых треков — выбираем по кругу.
 const coverColors = ["#e8a33d", "#4f7873", "#8a6fd6", "#c76b6b", "#5c9ad6", "#e0b84f"];
 
@@ -206,24 +233,72 @@ app.get('/api/tracks', (req, res) => {
 // наверх файла, так что ссылаться на него здесь можно).
 // upload.single('audioFile') — говорит multer'у: "жди ОДИН файл, который придёт
 // в форме под именем audioFile", и сохрани его согласно настройкам storage выше.
-app.post('/api/tracks', requireLogin, upload.single('audioFile'), (req, res) => {
-  const { title, artist } = req.body; // текстовые поля формы (не файл)
+app.post('/api/tracks', requireLogin, uploadTrackFiles, async (req, res) => {
+  const { title, artist, genre, description } = req.body; // текстовые поля формы (не файлы)
+  const audioFile = req.files && req.files.audioFile && req.files.audioFile[0];
+  const coverFile = req.files && req.files.cover && req.files.cover[0];
 
-  if (!req.file || !title || !artist) {
+  if (!audioFile || !title || !artist) {
     return res.status(400).json({ error: 'Не хватает данных: файл, название или исполнитель.' });
   }
 
   // Ссылка, по которой браузер сможет обратиться к загруженному файлу.
-  const src = '/uploads/' + req.file.filename;
+  const src = '/uploads/' + audioFile.filename;
+  const coverPath = coverFile ? '/uploads/' + coverFile.filename : null;
   const color = coverColors[Math.floor(Math.random() * coverColors.length)];
 
-  const insert = db.prepare(
-    'INSERT INTO tracks (title, artist, color, src, user_id) VALUES (?, ?, ?, ?, ?)'
+  // Пытаемся сами прочитать длительность из аудиофайла (сколько секунд он длится).
+  // music-metadata — библиотека только под ESM (без require), поэтому подключаем
+  // её динамическим import() прямо здесь. Если файл повреждён или формат странный —
+  // просто оставляем длительность пустой, это не повод отказывать в загрузке.
+  let duration = null;
+  try {
+    const mm = await import('music-metadata');
+    const metadata = await mm.parseFile(audioFile.path);
+    duration = Math.round(metadata.format.duration || 0);
+  } catch (err) {
+    console.log('Не удалось определить длительность трека:', err.message);
+  }
+
+  const insert = db.prepare(`
+    INSERT INTO tracks (title, artist, color, src, user_id, genre, description, cover_path, duration, play_count, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'))
+  `);
+  const result = insert.run(
+    title, artist, color, src, req.session.userId,
+    genre || null, description || null, coverPath, duration
   );
-  const result = insert.run(title, artist, color, src, req.session.userId);
 
   // Отправляем обратно только что созданный трек — фронтенду это пригодится.
   res.json({ id: result.lastInsertRowid, title, artist, color, src, user_id: req.session.userId });
+});
+
+// --- Отметить прослушивание (для счётчика play_count) ---
+app.post('/api/tracks/:id/play', (req, res) => {
+  db.prepare('UPDATE tracks SET play_count = play_count + 1 WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// --- Поиск по трекам: название, исполнитель, жанр ---
+app.get('/api/search', (req, res) => {
+  const q = (req.query.q || '').trim();
+  if (!q) return res.json({ tracks: [] });
+
+  const viewerId = req.session.userId || 0;
+  const like = `%${q}%`;
+  const tracks = db.prepare(`
+    SELECT tracks.*, users.username AS owner_username,
+      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id) AS like_count,
+      (SELECT COUNT(*) FROM comments WHERE comments.track_id = tracks.id) AS comment_count,
+      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id AND likes.user_id = ?) AS liked_by_me
+    FROM tracks
+    LEFT JOIN users ON users.id = tracks.user_id
+    WHERE tracks.title LIKE ? OR tracks.artist LIKE ? OR tracks.genre LIKE ?
+    ORDER BY tracks.id DESC
+    LIMIT 60
+  `).all(viewerId, like, like, like);
+
+  res.json({ tracks });
 });
 
 // --- Удалить свой трек ---
@@ -282,6 +357,42 @@ app.get('/api/users/:username', (req, res) => {
     },
     tracks
   });
+});
+
+// --- Похожие исполнители (как "Fans also like" в Spotify) ---
+// Основной сигнал — "люди, которые лайкали треки этого артиста, ещё лайкали треки Y":
+// находим всех, кто лайкал X, смотрим, что ЕЩЁ они лайкали (не считая самого X),
+// и группируем по автору — чем больше общих лайков, тем выше похожесть.
+// Если лайков мало и сигнала не набралось — подстраховываемся общим жанром.
+app.get('/api/users/:username/similar', (req, res) => {
+  const user = db.prepare('SELECT id, username FROM users WHERE username = ?').get(req.params.username);
+  if (!user) return res.status(404).json({ error: 'Пользователь не найден.' });
+
+  let similar = db.prepare(`
+    SELECT u2.username AS username, COUNT(*) AS score
+    FROM likes l1
+    JOIN tracks t1 ON t1.id = l1.track_id AND t1.user_id = ?
+    JOIN likes l2 ON l2.user_id = l1.user_id
+    JOIN tracks t2 ON t2.id = l2.track_id AND t2.user_id != ?
+    JOIN users u2 ON u2.id = t2.user_id
+    GROUP BY u2.id
+    ORDER BY score DESC
+    LIMIT 6
+  `).all(user.id, user.id);
+
+  if (similar.length === 0) {
+    similar = db.prepare(`
+      SELECT DISTINCT users.username AS username
+      FROM tracks
+      JOIN users ON users.id = tracks.user_id
+      WHERE tracks.user_id != ?
+        AND tracks.genre IS NOT NULL
+        AND tracks.genre IN (SELECT DISTINCT genre FROM tracks WHERE user_id = ? AND genre IS NOT NULL)
+      LIMIT 6
+    `).all(user.id, user.id);
+  }
+
+  res.json({ artists: similar.map(s => s.username) });
 });
 
 // --- Подписаться на пользователя ---

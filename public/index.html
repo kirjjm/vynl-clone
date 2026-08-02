@@ -250,6 +250,15 @@
 
   .profile-header{ display:flex; align-items:center; gap:14px; margin:-10px 0 16px; font-size:13px; color:var(--dim); }
 
+  .similar-artists{ align-items:center; gap:8px; flex-wrap:wrap; margin:-8px 0 16px; font-size:12.5px; color:var(--dim); }
+  .similar-artists .chip{
+    padding:4px 12px; border-radius:999px; background:var(--card); cursor:pointer; color:var(--text);
+    border:1px solid var(--glass-line); transition:.15s;
+  }
+  .similar-artists .chip:hover{ color:var(--accent); border-color:var(--accent); }
+
+  .track-meta{ font-size:11.5px; color:var(--dim); margin-top:2px; }
+
   .comments-list{ max-height:280px; overflow-y:auto; margin:14px 0; display:flex; flex-direction:column; gap:11px; }
   .comment-item{ font-size:13px; line-height:1.4; }
   .comment-author{ font-weight:600; color:var(--text); margin-right:6px; }
@@ -328,8 +337,10 @@
   .modal{
     background:var(--modal-bg); border:1px solid var(--glass-line); border-radius:20px;
     backdrop-filter:blur(30px); -webkit-backdrop-filter:blur(30px); box-shadow:var(--shadow);
-    padding:28px 28px 22px; width:370px;
+    padding:28px 28px 22px; width:370px; max-height:88vh; overflow-y:auto;
   }
+  select.form-input{ appearance:none; cursor:pointer; }
+  textarea.form-input{ resize:vertical; min-height:60px; font-family:inherit; }
   .modal h3{ font-size:20px; font-weight:700; margin-bottom:18px; }
   .form-label{ display:block; font-size:12.5px; color:var(--dim); margin:14px 0 6px; font-weight:600; }
   .form-label:first-of-type{ margin-top:0; }
@@ -430,6 +441,7 @@
       <span id="profile-stats"></span>
       <button id="profile-follow-btn" class="btn-glass" style="display:none;"></button>
     </div>
+    <div class="similar-artists" id="similar-artists" style="display:none;"></div>
     <div class="grid" id="track-grid"></div>
   </main>
 </div>
@@ -463,6 +475,26 @@
 
       <label class="form-label">Аудиофайл (mp3)</label>
       <input type="file" id="input-file" class="form-input" accept="audio/*" required>
+
+      <label class="form-label">Обложка (необязательно)</label>
+      <input type="file" id="input-cover" class="form-input" accept="image/*">
+
+      <label class="form-label">Жанр</label>
+      <select id="input-genre" class="form-input">
+        <option value="">Не указан</option>
+        <option>Electronic</option>
+        <option>Hip-Hop</option>
+        <option>Rock</option>
+        <option>Pop</option>
+        <option>Jazz</option>
+        <option>Classical</option>
+        <option>Ambient</option>
+        <option>Lo-fi</option>
+        <option>Other</option>
+      </select>
+
+      <label class="form-label">Описание (необязательно)</label>
+      <textarea id="input-description" class="form-input" maxlength="500"></textarea>
 
       <div class="modal-actions">
         <button type="button" id="modal-cancel-btn" class="btn-secondary">Отмена</button>
@@ -640,14 +672,31 @@
       // (у демо-треков owner_username не приходит с сервера — там некуда вести).
       const artistLinkable = !!t.owner_username;
 
+      // Если загружена настоящая обложка — показываем её картинкой на всю плитку,
+      // иначе (как и раньше) — цветной градиент с буквами названия.
+      // cover_path сделан из имени файла, который выбрал пользователь при загрузке —
+      // это чужой ввод, поэтому подставлять его строкой прямо в HTML-атрибут style="..."
+      // небезопасно (кавычка в имени файла могла бы "вырваться" из атрибута и добавить
+      // свой обработчик вроде onclick). Поэтому для обложки фон выставляется отдельно
+      // ниже через свойство style.backgroundImage — это не проходит через HTML-парсер.
+      const coverStyle = t.cover_path ? '' : `background:${coverBg(t.color)}`;
+      const coverLabel = t.cover_path ? '' : initials(t.title);
+
+      // Жанр, длительность и число прослушиваний — короткая строка под именем исполнителя.
+      const metaParts = [];
+      if (t.genre) metaParts.push(escapeHtml(t.genre));
+      if (t.duration) metaParts.push(fmt(t.duration));
+      metaParts.push((t.play_count || 0) + ' ▶');
+
       card.innerHTML = `
-        <div class="cover" style="background:${coverBg(t.color)}">
-          ${initials(t.title)}
+        <div class="cover" style="${coverStyle}">
+          ${coverLabel}
           <button class="add-to-playlist-btn" data-track-id="${t.id}" title="Добавить в плейлист">+</button>
           ${canDelete ? `<button class="delete-track-btn" data-track-id="${t.id}" title="Удалить трек">✕</button>` : ''}
         </div>
         <div class="track-title">${t.title}</div>
         <div class="track-artist${artistLinkable ? ' linkable' : ''}">${t.artist}</div>
+        <div class="track-meta">${metaParts.join(' · ')}</div>
         <div class="track-stats">
           <button class="stat-btn like-btn${t.liked_by_me ? ' active' : ''}" title="Нравится">
             ${HEART_ICON}<span class="stat-count">${t.like_count || 0}</span>
@@ -657,6 +706,14 @@
           </button>
         </div>
       `;
+
+      if (t.cover_path){
+        const coverEl = card.querySelector('.cover');
+        coverEl.style.backgroundImage = "url('" + t.cover_path + "')";
+        coverEl.style.backgroundSize = 'cover';
+        coverEl.style.backgroundPosition = 'center';
+      }
+
       card.addEventListener('click', () => loadTrack(i, true));
       card.querySelector('.add-to-playlist-btn').addEventListener('click', (e) => {
         e.stopPropagation();
@@ -829,11 +886,17 @@
     const title = document.getElementById('input-title').value;
     const artist = document.getElementById('input-artist').value;
     const file = document.getElementById('input-file').files[0];
+    const cover = document.getElementById('input-cover').files[0];
+    const genre = document.getElementById('input-genre').value;
+    const description = document.getElementById('input-description').value;
 
     const formData = new FormData();
     formData.append('title', title);
     formData.append('artist', artist);
     formData.append('audioFile', file);
+    if (cover) formData.append('cover', cover);
+    if (genre) formData.append('genre', genre);
+    if (description) formData.append('description', description);
 
     uploadStatus.textContent = 'Загружаем...';
     uploadStatus.className = 'upload-status';
@@ -1012,12 +1075,31 @@
   const profileHeader = document.getElementById('profile-header');
   const profileStats = document.getElementById('profile-stats');
   const profileFollowBtn = document.getElementById('profile-follow-btn');
+  const similarArtistsEl = document.getElementById('similar-artists');
 
   let profileState = null; // { userId, isFollowed, followersCount, followingCount }
 
   function hideProfileHeader(){
     profileHeader.style.display = 'none';
+    similarArtistsEl.style.display = 'none';
     profileState = null;
+  }
+
+  // "Похоже на" — короткий ряд других исполнителей, посчитанный сервером
+  // (по совпадающим лайкам слушателей, либо по общему жанру).
+  async function loadSimilarArtists(username){
+    const response = await fetch(`/api/users/${encodeURIComponent(username)}/similar`);
+    if (!response.ok){ similarArtistsEl.style.display = 'none'; return; }
+    const data = await response.json();
+    if (!data.artists.length){ similarArtistsEl.style.display = 'none'; return; }
+
+    similarArtistsEl.innerHTML = '<span>Похоже на:</span> ' + data.artists.map(a =>
+      `<span class="chip" data-username="${escapeHtml(a)}">${escapeHtml(a)}</span>`
+    ).join('');
+    similarArtistsEl.querySelectorAll('.chip').forEach(chip => {
+      chip.addEventListener('click', () => openProfileView(chip.dataset.username));
+    });
+    similarArtistsEl.style.display = 'flex';
   }
 
   function renderProfileHeader(){
@@ -1053,6 +1135,7 @@
       showFollowBtn: !isOwnProfile
     };
     renderProfileHeader();
+    loadSimilarArtists(username);
   }
 
   profileFollowBtn.addEventListener('click', async () => {
@@ -1143,6 +1226,16 @@
     return m + ':' + String(s).padStart(2,'0');
   }
 
+  // Ставим обложку на плеере снизу и в блоке "Сейчас играет": если есть настоящая
+  // картинка — показываем её, иначе — прежний цветной градиент с буквами.
+  function setCoverEl(el, t){
+    el.style.backgroundImage = t.cover_path ? "url('" + t.cover_path + "')" : '';
+    el.style.background = t.cover_path ? '' : coverBg(t.color);
+    el.style.backgroundSize = 'cover';
+    el.style.backgroundPosition = 'center';
+    el.textContent = t.cover_path ? '' : initials(t.title);
+  }
+
   function loadTrack(i, autoplay){
     document.querySelectorAll('.track-card').forEach(c => c.classList.remove('playing'));
     currentIndex = i;
@@ -1150,21 +1243,24 @@
     audio.src = t.src;
 
     // Плеер снизу
-    npCover.style.background = coverBg(t.color);
-    npCover.textContent = '';
+    setCoverEl(npCover, t);
     npTitle.textContent = t.title;
     npArtist.textContent = t.artist;
 
     // Герой «Сейчас играет»
-    heroCover.style.background = coverBg(t.color);
-    heroCover.textContent = '';
+    setCoverEl(heroCover, t);
     heroTitle.textContent = t.title;
     heroArtist.textContent = t.artist;
 
     const card = document.getElementById('card-' + i);
     if (card) card.classList.add('playing');
 
-    if (autoplay) audio.play();
+    if (autoplay){
+      audio.play();
+      // Считаем прослушивание в момент реального старта нового трека
+      // (а не при каждой паузе/возобновлении одного и того же трека).
+      fetch(`/api/tracks/${t.id}/play`, { method: 'POST' }).catch(() => {});
+    }
   }
 
   function setPlayingState(playing){
@@ -1262,13 +1358,28 @@
     applySearch();
   }
 
-  // Живая фильтрация по названию и исполнителю.
+  // Поиск теперь спрашивает сервер (по названию, исполнителю И жанру, а не только
+  // по тому, что уже загружено в браузер) — с небольшой задержкой (debounce),
+  // чтобы не слать запрос на каждую нажатую букву.
+  let searchDebounceTimer = null;
+
   function applySearch(){
-    const q = searchInput.value.trim().toLowerCase();
-    tracks = q
-      ? libraryTracks.filter(t => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q))
-      : libraryTracks.slice();
-    renderTrackCards();
+    const q = searchInput.value.trim();
+    clearTimeout(searchDebounceTimer);
+
+    if (!q){
+      tracks = libraryTracks.slice();
+      renderTrackCards();
+      return;
+    }
+
+    searchDebounceTimer = setTimeout(async () => {
+      const response = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+      if (!response.ok) return;
+      const data = await response.json();
+      tracks = data.tracks;
+      renderTrackCards();
+    }, 250);
   }
 
   // Лента доступна только вошедшим — без входа просто открываем окно логина.
