@@ -49,6 +49,46 @@ if (!trackColumns.some(c => c.name === 'user_id')) {
   console.log('Миграция: в tracks добавлена колонка user_id.');
 }
 
+// Лайки: кто каким трекам поставил лайк. UNIQUE(user_id, track_id) не даёт
+// одному пользователю лайкнуть один и тот же трек дважды.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS likes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    track_id INTEGER NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, track_id),
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (track_id) REFERENCES tracks(id)
+  )
+`);
+
+// Подписки: follower_id подписан на followee_id.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS follows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    follower_id INTEGER NOT NULL,
+    followee_id INTEGER NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(follower_id, followee_id),
+    FOREIGN KEY (follower_id) REFERENCES users(id),
+    FOREIGN KEY (followee_id) REFERENCES users(id)
+  )
+`);
+
+// Комментарии под треками.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    track_id INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (track_id) REFERENCES tracks(id)
+  )
+`);
+
 // Сам плейлист — просто название и чей он (user_id).
 db.exec(`
   CREATE TABLE IF NOT EXISTS playlists (
@@ -140,13 +180,24 @@ app.use(session({
 // Теперь этот маршрут не берёт данные из списка в коде,
 // а делает настоящий SQL-запрос к базе данных.
 app.get('/api/tracks', (req, res) => {
+  // 0 — заглушка вместо userId, если никто не вошёл: реальный id в базе
+  // никогда не будет 0 (AUTOINCREMENT начинается с 1), так что liked_by_me
+  // просто всегда окажется 0/false для гостя.
+  const viewerId = req.session.userId || 0;
+
   // LEFT JOIN — у демо-треков user_id пустой (NULL), но они всё равно должны
   // попасть в список, поэтому не INNER JOIN, а именно LEFT.
+  // like_count/comment_count — подзапросы, которые на лету считают,
+  // сколько у трека лайков и комментариев. liked_by_me — лайкнул ли трек
+  // именно тот, кто сейчас смотрит список.
   const tracks = db.prepare(`
-    SELECT tracks.*, users.username AS owner_username
+    SELECT tracks.*, users.username AS owner_username,
+      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id) AS like_count,
+      (SELECT COUNT(*) FROM comments WHERE comments.track_id = tracks.id) AS comment_count,
+      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id AND likes.user_id = ?) AS liked_by_me
     FROM tracks
     LEFT JOIN users ON users.id = tracks.user_id
-  `).all();
+  `).all(viewerId);
   res.json(tracks);
 });
 
@@ -183,9 +234,11 @@ app.delete('/api/tracks/:id', requireLogin, (req, res) => {
     return res.status(403).json({ error: 'Можно удалять только свои треки.' });
   }
 
-  // Сначала убираем трек из всех плейлистов (иначе останутся "битые" ссылки),
-  // потом сам трек.
+  // Сначала убираем все следы трека в других таблицах (иначе там останутся
+  // "битые" строки, ссылающиеся на уже удалённый id), потом сам трек.
   db.prepare('DELETE FROM playlist_tracks WHERE track_id = ?').run(track.id);
+  db.prepare('DELETE FROM likes WHERE track_id = ?').run(track.id);
+  db.prepare('DELETE FROM comments WHERE track_id = ?').run(track.id);
   db.prepare('DELETE FROM tracks WHERE id = ?').run(track.id);
 
   // Демо-треки ссылаются на внешний soundhelix.com, а не на файл на диске —
@@ -203,14 +256,122 @@ app.get('/api/users/:username', (req, res) => {
   const user = db.prepare('SELECT id, username FROM users WHERE username = ?').get(req.params.username);
   if (!user) return res.status(404).json({ error: 'Пользователь не найден.' });
 
+  const viewerId = req.session.userId || 0;
   const tracks = db.prepare(`
-    SELECT tracks.*, users.username AS owner_username
+    SELECT tracks.*, users.username AS owner_username,
+      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id) AS like_count,
+      (SELECT COUNT(*) FROM comments WHERE comments.track_id = tracks.id) AS comment_count,
+      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id AND likes.user_id = ?) AS liked_by_me
     FROM tracks
     LEFT JOIN users ON users.id = tracks.user_id
     WHERE tracks.user_id = ?
-  `).all(user.id);
+  `).all(viewerId, user.id);
 
-  res.json({ user, tracks });
+  const followersCount = db.prepare('SELECT COUNT(*) AS c FROM follows WHERE followee_id = ?').get(user.id).c;
+  const followingCount = db.prepare('SELECT COUNT(*) AS c FROM follows WHERE follower_id = ?').get(user.id).c;
+  const isFollowedByMe = viewerId
+    ? !!db.prepare('SELECT 1 FROM follows WHERE follower_id = ? AND followee_id = ?').get(viewerId, user.id)
+    : false;
+
+  res.json({
+    user: {
+      ...user,
+      followers_count: followersCount,
+      following_count: followingCount,
+      is_followed_by_me: isFollowedByMe
+    },
+    tracks
+  });
+});
+
+// --- Подписаться на пользователя ---
+app.post('/api/users/:id/follow', requireLogin, (req, res) => {
+  const targetId = Number(req.params.id);
+  if (targetId === req.session.userId) {
+    return res.status(400).json({ error: 'Нельзя подписаться на самого себя.' });
+  }
+  const target = db.prepare('SELECT id FROM users WHERE id = ?').get(targetId);
+  if (!target) return res.status(404).json({ error: 'Пользователь не найден.' });
+
+  // INSERT OR IGNORE — если подписка уже есть (UNIQUE), просто ничего не делать,
+  // а не падать с ошибкой.
+  db.prepare('INSERT OR IGNORE INTO follows (follower_id, followee_id) VALUES (?, ?)')
+    .run(req.session.userId, targetId);
+  res.json({ ok: true });
+});
+
+// --- Отписаться ---
+app.delete('/api/users/:id/follow', requireLogin, (req, res) => {
+  db.prepare('DELETE FROM follows WHERE follower_id = ? AND followee_id = ?')
+    .run(req.session.userId, req.params.id);
+  res.json({ ok: true });
+});
+
+// --- Поставить лайк треку ---
+app.post('/api/tracks/:id/like', requireLogin, (req, res) => {
+  const track = db.prepare('SELECT id FROM tracks WHERE id = ?').get(req.params.id);
+  if (!track) return res.status(404).json({ error: 'Трек не найден.' });
+
+  db.prepare('INSERT OR IGNORE INTO likes (user_id, track_id) VALUES (?, ?)')
+    .run(req.session.userId, req.params.id);
+  res.json({ ok: true });
+});
+
+// --- Убрать лайк ---
+app.delete('/api/tracks/:id/like', requireLogin, (req, res) => {
+  db.prepare('DELETE FROM likes WHERE user_id = ? AND track_id = ?')
+    .run(req.session.userId, req.params.id);
+  res.json({ ok: true });
+});
+
+// --- Комментарии под треком: список ---
+app.get('/api/tracks/:id/comments', (req, res) => {
+  const comments = db.prepare(`
+    SELECT comments.*, users.username FROM comments
+    JOIN users ON users.id = comments.user_id
+    WHERE comments.track_id = ?
+    ORDER BY comments.id ASC
+  `).all(req.params.id);
+  res.json(comments);
+});
+
+// --- Добавить комментарий ---
+app.post('/api/tracks/:id/comments', requireLogin, (req, res) => {
+  const { text } = req.body;
+  if (!text || !text.trim()) {
+    return res.status(400).json({ error: 'Комментарий не может быть пустым.' });
+  }
+
+  const track = db.prepare('SELECT id FROM tracks WHERE id = ?').get(req.params.id);
+  if (!track) return res.status(404).json({ error: 'Трек не найден.' });
+
+  const insert = db.prepare('INSERT INTO comments (user_id, track_id, text) VALUES (?, ?, ?)');
+  const result = insert.run(req.session.userId, req.params.id, text.trim());
+
+  const user = db.prepare('SELECT username FROM users WHERE id = ?').get(req.session.userId);
+  res.json({
+    id: result.lastInsertRowid,
+    user_id: req.session.userId,
+    track_id: Number(req.params.id),
+    text: text.trim(),
+    username: user.username
+  });
+});
+
+// --- Лента: треки тех, на кого я подписан ---
+app.get('/api/feed', requireLogin, (req, res) => {
+  const tracks = db.prepare(`
+    SELECT tracks.*, users.username AS owner_username,
+      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id) AS like_count,
+      (SELECT COUNT(*) FROM comments WHERE comments.track_id = tracks.id) AS comment_count,
+      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id AND likes.user_id = ?) AS liked_by_me
+    FROM tracks
+    JOIN follows ON follows.followee_id = tracks.user_id
+    JOIN users ON users.id = tracks.user_id
+    WHERE follows.follower_id = ?
+    ORDER BY tracks.id DESC
+  `).all(req.session.userId, req.session.userId);
+  res.json(tracks);
 });
 
 // --- Регистрация ---
@@ -313,11 +474,15 @@ app.get('/api/playlists/:id', requireLogin, (req, res) => {
   // JOIN — объединяем две таблицы: playlist_tracks (кто в каком плейлисте)
   // и tracks (сама информация о треке), чтобы получить полные данные треков.
   const tracks = db.prepare(`
-    SELECT tracks.*, users.username AS owner_username FROM playlist_tracks
+    SELECT tracks.*, users.username AS owner_username,
+      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id) AS like_count,
+      (SELECT COUNT(*) FROM comments WHERE comments.track_id = tracks.id) AS comment_count,
+      (SELECT COUNT(*) FROM likes WHERE likes.track_id = tracks.id AND likes.user_id = ?) AS liked_by_me
+    FROM playlist_tracks
     JOIN tracks ON tracks.id = playlist_tracks.track_id
     LEFT JOIN users ON users.id = tracks.user_id
     WHERE playlist_tracks.playlist_id = ?
-  `).all(req.params.id);
+  `).all(req.session.userId, req.params.id);
 
   res.json({ ...playlist, tracks });
 });
