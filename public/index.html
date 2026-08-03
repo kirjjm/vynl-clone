@@ -1470,8 +1470,14 @@
     audio.currentTime = pct * audio.duration;
   });
 
-  volume.addEventListener('input', () => { audio.volume = volume.value / 100; });
-  audio.volume = 0.7;
+  const savedVolume = localStorage.getItem('volume');
+  volume.value = savedVolume !== null ? savedVolume : 70;
+  audio.volume = volume.value / 100;
+
+  volume.addEventListener('input', () => {
+    audio.volume = volume.value / 100;
+    localStorage.setItem('volume', volume.value);
+  });
 
   // ---------- Навигация: Главная / Поиск / Библиотека / Лента ----------
   const navItemsAll = document.querySelectorAll('.nav-item');
