@@ -129,8 +129,13 @@
   }
   .playlists h3 button{ background:none; border:none; color:var(--dim); cursor:pointer; font-size:16px; line-height:1; }
   .playlists h3 button:hover{ color:var(--accent); }
-  .playlist-item{ padding:7px 12px; margin:0 -8px; border-radius:10px; font-size:13.5px; color:var(--dim); cursor:pointer; }
+  .playlist-item{ padding:7px 12px; margin:0 -8px; border-radius:10px; font-size:13.5px; color:var(--dim); cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:8px; }
   .playlist-item:hover{ background:var(--card); color:var(--text); }
+  .playlist-item-name{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pin-btn{ background:none; border:none; color:var(--dim); cursor:pointer; font-size:12px; line-height:1; opacity:0; flex-shrink:0; padding:0; }
+  .playlist-item:hover .pin-btn, .pin-btn.active{ opacity:1; }
+  .pin-btn.active{ color:var(--accent); }
+  .pin-btn:hover{ color:var(--accent); }
 
   .auth-area{ border-top:1px solid var(--glass-line); padding-top:16px; }
   .auth-user-row{ display:flex; align-items:center; gap:10px; }
@@ -1149,12 +1154,29 @@
       playlistListEl.innerHTML = `<div class="playlist-item" style="cursor:default;">Пока нет плейлистов</div>`;
       return;
     }
-    playlistListEl.innerHTML = playlists.map(p =>
-      `<div class="playlist-item" data-playlist-id="${p.id}">${p.name}</div>`
-    ).join('');
+    playlistListEl.innerHTML = playlists.map(p => `
+      <div class="playlist-item" data-playlist-id="${p.id}">
+        <span class="playlist-item-name">${p.is_favorites ? '💚 ' : ''}${p.name}</span>
+        ${p.is_favorites
+          ? '<span class="pin-btn active" title="Всегда закреплено">📌</span>'
+          : `<button class="pin-btn${p.is_pinned ? ' active' : ''}" data-playlist-id="${p.id}" title="${p.is_pinned ? 'Открепить' : 'Закрепить'}">📌</button>`}
+      </div>
+    `).join('');
 
     playlistListEl.querySelectorAll('.playlist-item[data-playlist-id]').forEach(el => {
-      el.addEventListener('click', () => openPlaylistView(el.dataset.playlistId, el.textContent));
+      el.addEventListener('click', (e) => {
+        if (e.target.closest('.pin-btn')) return;
+        const playlist = myPlaylists.find(p => String(p.id) === el.dataset.playlistId);
+        if (playlist) openPlaylistView(playlist.id, playlist.name);
+      });
+    });
+
+    playlistListEl.querySelectorAll('button.pin-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await fetch(`/api/playlists/${btn.dataset.playlistId}/pin`, { method: 'POST' });
+        await loadPlaylists();
+      });
     });
   }
 
@@ -1337,10 +1359,12 @@
   });
 
   function openAddToPlaylistPopover(buttonEl, trackId){
-    if (myPlaylists.length === 0){
+    // "Избранное" наполняется только через лайк, вручную треки туда не добавляют.
+    const addablePlaylists = myPlaylists.filter(p => !p.is_favorites);
+    if (addablePlaylists.length === 0){
       popover.innerHTML = `<div class="popover-empty">Сначала создай плейлист (кнопка «+» в сайдбаре)</div>`;
     } else {
-      popover.innerHTML = myPlaylists.map(p =>
+      popover.innerHTML = addablePlaylists.map(p =>
         `<div class="popover-item" data-playlist-id="${p.id}">${p.name}</div>`
       ).join('');
     }

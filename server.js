@@ -181,6 +181,36 @@ if (!playlistColumns.includes('is_public')) {
   console.log('Миграция: в playlists добавлена колонка is_public.');
 }
 
+// Миграция: плейлисты можно закреплять наверху списка.
+if (!playlistColumns.includes('is_pinned')) {
+  db.exec('ALTER TABLE playlists ADD COLUMN is_pinned INTEGER DEFAULT 0');
+  console.log('Миграция: в playlists добавлена колонка is_pinned.');
+}
+
+// Миграция: у каждого пользователя есть свой плейлист "Избранное" —
+// он собирается из лайкнутых треков и всегда закреплён, как в Spotify.
+if (!playlistColumns.includes('is_favorites')) {
+  db.exec('ALTER TABLE playlists ADD COLUMN is_favorites INTEGER DEFAULT 0');
+  console.log('Миграция: в playlists добавлена колонка is_favorites.');
+}
+
+// Находит плейлист "Избранное" пользователя, а если его ещё нет — создаёт
+// и сразу наполняет уже лайкнутыми им треками (актуально для старых аккаунтов).
+function ensureFavoritesPlaylist(userId) {
+  let favorites = db.prepare('SELECT * FROM playlists WHERE user_id = ? AND is_favorites = 1').get(userId);
+  if (favorites) return favorites;
+
+  const result = db.prepare(
+    'INSERT INTO playlists (user_id, name, is_public, is_pinned, is_favorites) VALUES (?, ?, 0, 1, 1)'
+  ).run(userId, 'Избранное');
+
+  const insertTrack = db.prepare('INSERT INTO playlist_tracks (playlist_id, track_id) VALUES (?, ?)');
+  const likedTracks = db.prepare('SELECT track_id FROM likes WHERE user_id = ?').all(userId);
+  for (const row of likedTracks) insertTrack.run(result.lastInsertRowid, row.track_id);
+
+  return db.prepare('SELECT * FROM playlists WHERE id = ?').get(result.lastInsertRowid);
+}
+
 // Таблица-связка: какой трек лежит в каком плейлисте.
 // Один трек может быть сразу в нескольких разных плейлистах — поэтому
 // это отдельная таблица, а не просто список id внутри playlists.
@@ -592,6 +622,13 @@ app.post('/api/tracks/:id/like', requireLogin, (req, res) => {
 
   db.prepare('INSERT OR IGNORE INTO likes (user_id, track_id) VALUES (?, ?)')
     .run(req.session.userId, req.params.id);
+
+  const favorites = ensureFavoritesPlaylist(req.session.userId);
+  const alreadyInFavorites = db.prepare('SELECT id FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?')
+    .get(favorites.id, req.params.id);
+  if (!alreadyInFavorites) {
+    db.prepare('INSERT INTO playlist_tracks (playlist_id, track_id) VALUES (?, ?)').run(favorites.id, req.params.id);
+  }
   res.json({ ok: true });
 });
 
@@ -599,6 +636,10 @@ app.post('/api/tracks/:id/like', requireLogin, (req, res) => {
 app.delete('/api/tracks/:id/like', requireLogin, (req, res) => {
   db.prepare('DELETE FROM likes WHERE user_id = ? AND track_id = ?')
     .run(req.session.userId, req.params.id);
+
+  const favorites = ensureFavoritesPlaylist(req.session.userId);
+  db.prepare('DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?')
+    .run(favorites.id, req.params.id);
   res.json({ ok: true });
 });
 
@@ -768,8 +809,24 @@ function requireAdmin(req, res, next) {
 
 // --- Список плейлистов текущего пользователя ---
 app.get('/api/playlists', requireLogin, (req, res) => {
-  const playlists = db.prepare('SELECT * FROM playlists WHERE user_id = ?').all(req.session.userId);
+  ensureFavoritesPlaylist(req.session.userId);
+  // "Избранное" всегда первое, дальше закреплённые, дальше остальные по дате создания.
+  const playlists = db.prepare(
+    'SELECT * FROM playlists WHERE user_id = ? ORDER BY is_favorites DESC, is_pinned DESC, id ASC'
+  ).all(req.session.userId);
   res.json(playlists);
+});
+
+// --- Закрепить/открепить плейлист ---
+app.post('/api/playlists/:id/pin', requireLogin, (req, res) => {
+  const playlist = db.prepare('SELECT * FROM playlists WHERE id = ? AND user_id = ?')
+    .get(req.params.id, req.session.userId);
+  if (!playlist) return res.status(404).json({ error: 'Плейлист не найден.' });
+  if (playlist.is_favorites) return res.status(400).json({ error: 'Избранное всегда закреплено.' });
+
+  const isPinned = playlist.is_pinned ? 0 : 1;
+  db.prepare('UPDATE playlists SET is_pinned = ? WHERE id = ?').run(isPinned, req.params.id);
+  res.json({ ok: true, is_pinned: isPinned });
 });
 
 // --- Создать новый плейлист ---
